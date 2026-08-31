@@ -86,6 +86,8 @@ final class DartModelParser {
         .whereType<EnumDeclaration>()
         .map((declaration) => declaration.name.lexeme)
         .toSet();
+    final classNames =
+        classes.map((declaration) => declaration.name.lexeme).toSet();
     final topLevelFunctionNames = unit.declarations
         .whereType<FunctionDeclaration>()
         .map((declaration) => declaration.name.lexeme)
@@ -96,6 +98,7 @@ final class DartModelParser {
         declaration,
         source,
         path,
+        classNames,
         enumNames,
         topLevelFunctionNames,
         diagnostics,
@@ -131,6 +134,7 @@ final class DartModelParser {
     ClassDeclaration declaration,
     String source,
     String path,
+    Set<String> classNames,
     Set<String> enumNames,
     Set<String> topLevelFunctionNames,
     List<String> diagnostics,
@@ -150,6 +154,22 @@ final class DartModelParser {
     for (final member in declaration.members) {
       if (member is FieldDeclaration) {
         if (member.isStatic || member.fields.isConst) {
+          final collisions = member.fields.variables
+              .where(
+                (variable) =>
+                    _generatedStructureNames.contains(variable.name.lexeme),
+              )
+              .toList();
+          for (final variable in collisions) {
+            diagnostics.add(
+              'Unsupported structural member '
+              '$className.${variable.name.lexeme} in '
+              '$path:${variable.offset}.',
+            );
+          }
+          if (collisions.isNotEmpty) {
+            continue;
+          }
           preservedMembers.add(_sourceSlice(source, member));
           continue;
         }
@@ -209,9 +229,23 @@ final class DartModelParser {
 
       if (member is MethodDeclaration) {
         final name = member.name.lexeme;
+        if (member.isStatic && _generatedStructureNames.contains(name)) {
+          diagnostics.add(
+            'Unsupported structural member $className.$name in '
+            '$path:${member.offset}.',
+          );
+          continue;
+        }
         if (name == 'copyWith') {
-          hasCopyWith = true;
-          preservedMembers.add(_sourceSlice(source, member));
+          if (_isSupportedCopyWith(member, className)) {
+            hasCopyWith = true;
+            preservedMembers.add(_sourceSlice(source, member));
+          } else {
+            diagnostics.add(
+              'Unsupported structural member $className.$name in '
+              '$path:${member.offset}.',
+            );
+          }
           continue;
         }
         if (_isSupportedStructuralMethod(member, className)) {
@@ -290,10 +324,10 @@ final class DartModelParser {
           continue;
         }
         if (field.shape.kind == ModelFieldKind.list &&
-            (enumNames.contains(field.shape.nestedType) ||
-                _callsEnumConverterShape(expression, converterNames))) {
+            !_isSupportedListElement(field.shape.nestedType!, classNames)) {
           diagnostics.add(
-            'Unsupported enum list field $className.${field.name} in $path.',
+            'Unsupported list element ${field.shape.nestedType} for '
+            '$className.${field.name} in $path.',
           );
           continue;
         }
@@ -476,15 +510,6 @@ bool _callsNamed(Expression expression, String name) {
   return visitor.found;
 }
 
-bool _callsEnumConverterShape(
-  Expression expression,
-  Set<String> converterNames,
-) {
-  return converterNames
-      .where((name) => name.startsWith('_') && name.endsWith('FromJson'))
-      .any((name) => _callsNamed(expression, name));
-}
-
 String _sourceSlice(String source, AstNode node) {
   return source.substring(node.offset, node.end);
 }
@@ -655,10 +680,6 @@ bool _isSupportedStructuralMethod(
   }
 
   switch (method.name.lexeme) {
-    case 'empty':
-      return method.isStatic &&
-          parameters.parameters.isEmpty &&
-          _typeSourceIs(method.returnType, className);
     case 'toJson':
       return !method.isStatic &&
           parameters.parameters.isEmpty &&
@@ -682,6 +703,22 @@ bool _isSupportedStructuralMethod(
     default:
       return false;
   }
+}
+
+bool _isSupportedCopyWith(MethodDeclaration method, String className) {
+  if (method.isStatic ||
+      method.isGetter ||
+      method.isSetter ||
+      method.isOperator ||
+      method.isAbstract ||
+      method.externalKeyword != null ||
+      method.typeParameters != null ||
+      !_typeSourceIs(method.returnType, className)) {
+    return false;
+  }
+  final parameters = method.parameters;
+  return parameters != null &&
+      parameters.parameters.every((parameter) => parameter.isOptionalNamed);
 }
 
 bool _collidesWithGeneratedStructure(MethodDeclaration method) {
@@ -716,3 +753,24 @@ bool _hasSingleRequiredParameterOfType(
 bool _typeSourceIs(TypeAnnotation? type, String source) {
   return type is NamedType && type.toSource() == source;
 }
+
+const _generatedStructureNames = {
+  'empty',
+  'fromJson',
+  'toJson',
+  'copyWith',
+};
+
+bool _isSupportedListElement(String typeSource, Set<String> classNames) {
+  return _supportedListScalarTypes.contains(typeSource) ||
+      classNames.contains(typeSource);
+}
+
+const _supportedListScalarTypes = {
+  'String',
+  'int',
+  'double',
+  'num',
+  'bool',
+  'DateTime',
+};

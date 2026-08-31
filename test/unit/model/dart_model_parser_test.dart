@@ -187,7 +187,7 @@ class ReportModel {
         statuses: (json?["statuses"] is List
                 ? json!["statuses"] as List
                 : [])
-            .map((item) => _statusFromJson(item))
+            .map(_statusFromJson)
             .toList(),
       );
 }
@@ -218,7 +218,7 @@ class ReportModel {
         statuses: (json?["statuses"] is List
                 ? json!["statuses"] as List
                 : [])
-            .map((item) => _statusFromJson(item))
+            .map(_statusFromJson)
             .toList(),
       );
 }
@@ -231,6 +231,58 @@ RemoteStatus _statusFromJson(dynamic value) => throw UnimplementedError();
     expect(result.isSafe, isFalse);
     expect(result.spec, isNull);
     expect(result.diagnostics.join('\n'), contains('ReportModel.statuses'));
+  });
+
+  test('refuses an imported enum list using values.byName', () {
+    const source = '''
+import 'remote.dart' as remote;
+
+class ReportModel {
+  final List<remote.RemoteStatus> statuses;
+
+  ReportModel({required this.statuses});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        statuses: (json?["statuses"] is List
+                ? json!["statuses"] as List
+                : [])
+            .map(
+              (item) => remote.RemoteStatus.values.byName(item.toString()),
+            )
+            .toList(),
+      );
+}
+''';
+
+    final result = parser.parse(source, 'imported_enum_list.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.statuses'));
+  });
+
+  test('refuses an imported model list without local structural proof', () {
+    const source = '''
+import 'remote.dart' as remote;
+
+class ReportModel {
+  final List<remote.RemoteModel> models;
+
+  ReportModel({required this.models});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        models: (json?["models"] is List ? json!["models"] as List : [])
+            .map((item) => remote.RemoteModel.fromJson(item))
+            .toList(),
+      );
+}
+''';
+
+    final result = parser.parse(source, 'imported_model_list.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.models'));
   });
 
   test('accepts primitive, date, and model list element types', () {
@@ -443,6 +495,83 @@ class ReportModel {
         reason: entry.key,
       );
     }
+  });
+
+  const zeroFieldStaticCollisions = {
+    'field': 'static const empty = 0;',
+    'getter': 'static int get fromJson => 0;',
+    'setter': 'static set toJson(int value) {}',
+    'method': 'static EmptyModel copyWith() => EmptyModel();',
+  };
+  for (final entry in zeroFieldStaticCollisions.entries) {
+    test('refuses a zero-field static ${entry.key} structural collision', () {
+      final source = '''
+class EmptyModel {
+  ${entry.value}
+}
+''';
+
+      final result = parser.parse(source, 'static_${entry.key}.dart');
+
+      expect(result.isSafe, isFalse);
+      expect(result.spec, isNull);
+      expect(result.diagnostics.join('\n'), contains('EmptyModel.'));
+    });
+  }
+
+  test('refuses nonempty static structural members including copyWith', () {
+    const collidingMembers = {
+      'empty': 'static ReportModel empty() => ReportModel(id: "");',
+      'copyWith': 'static const copyWith = 1;',
+    };
+
+    for (final entry in collidingMembers.entries) {
+      final source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        id: (json?["id"] ?? "").toString(),
+      );
+
+  ${entry.value}
+}
+''';
+
+      final result = parser.parse(source, 'static_${entry.key}.dart');
+
+      expect(result.isSafe, isFalse, reason: entry.key);
+      expect(result.spec, isNull, reason: entry.key);
+      expect(
+        result.diagnostics.join('\n'),
+        contains('ReportModel.${entry.key}'),
+        reason: entry.key,
+      );
+    }
+  });
+
+  test('refuses an unsupported instance copyWith collision', () {
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        id: (json?["id"] ?? "").toString(),
+      );
+
+  String copyWith({String? id}) => id ?? this.id;
+}
+''';
+
+    final result = parser.parse(source, 'unsupported_copy_with.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.copyWith'));
   });
 
   test('omits only supported structural method signatures', () {
