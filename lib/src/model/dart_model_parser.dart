@@ -558,7 +558,8 @@ ArgumentList? _classConstructionArguments(
   final unwrapped = _unwrapParentheses(expression);
   if (unwrapped is InstanceCreationExpression) {
     final constructor = unwrapped.constructorName;
-    if (constructor.type.name2.lexeme != className) {
+    if (constructor.type.importPrefix != null ||
+        constructor.type.name2.lexeme != className) {
       return null;
     }
     final constructorName = constructor.name?.name;

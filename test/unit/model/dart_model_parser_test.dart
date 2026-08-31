@@ -409,6 +409,28 @@ class ReportModel {
     expect(result.diagnostics.join('\n'), contains('ReportModel.fromJson'));
   });
 
+  test('refuses a prefixed external construction with the local class name',
+      () {
+    const source = '''
+import "other.dart" as other;
+
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      new other.ReportModel(id: (json?["id"] ?? "").toString());
+}
+''';
+
+    final result = parser.parse(source, 'prefixed_constructor_model.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.fromJson'));
+  });
+
   test('uses the actual block return and records literal source offsets', () {
     const source = '''
 class ReportModel {
