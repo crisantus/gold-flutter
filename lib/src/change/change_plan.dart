@@ -1,0 +1,104 @@
+import 'dart:collection';
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
+enum FileChangeKind { create, modify }
+
+final class PlannedFileChange {
+  const PlannedFileChange({
+    required this.relativePath,
+    required this.content,
+    required this.kind,
+    required this.reason,
+  });
+
+  final String relativePath;
+  final String content;
+  final FileChangeKind kind;
+  final String reason;
+}
+
+final class PlannedCommand {
+  const PlannedCommand({
+    required this.executable,
+    required List<String> arguments,
+    required this.reason,
+    required this.mutatesFiles,
+  }) : _arguments = arguments;
+
+  final String executable;
+  final List<String> _arguments;
+  final String reason;
+  final bool mutatesFiles;
+
+  List<String> get arguments => UnmodifiableListView(_arguments);
+}
+
+final class ChangePlan {
+  ChangePlan({
+    required this.summary,
+    required this.projectRoot,
+    Iterable<PlannedFileChange> files = const [],
+    Iterable<PlannedCommand> commands = const [],
+    Iterable<String> snapshotRoots = const [],
+  })  : files = List.unmodifiable(
+          _normalizeAndValidateFiles(files),
+        ),
+        commands = List.unmodifiable(commands),
+        snapshotRoots = List.unmodifiable(
+          _normalizeAndValidateRoots(snapshotRoots),
+        );
+
+  final String summary;
+  final Directory projectRoot;
+  final List<PlannedFileChange> files;
+  final List<PlannedCommand> commands;
+  final List<String> snapshotRoots;
+
+  static List<PlannedFileChange> _normalizeAndValidateFiles(
+    Iterable<PlannedFileChange> changes,
+  ) {
+    final normalized = <PlannedFileChange>[];
+    final paths = <String>{};
+    for (final change in changes) {
+      final path = _validateRelativePath(change.relativePath);
+      if (!paths.add(path)) {
+        throw ArgumentError('Duplicate planned file path: $path');
+      }
+      normalized.add(
+        PlannedFileChange(
+          relativePath: path,
+          content: change.content,
+          kind: change.kind,
+          reason: change.reason,
+        ),
+      );
+    }
+    return normalized;
+  }
+
+  static List<String> _normalizeAndValidateRoots(Iterable<String> roots) {
+    final normalized = <String>[];
+    final paths = <String>{};
+    for (final root in roots) {
+      final path = _validateRelativePath(root);
+      if (!paths.add(path)) {
+        throw ArgumentError('Duplicate snapshot root: $path');
+      }
+      normalized.add(path);
+    }
+    return normalized;
+  }
+
+  static String _validateRelativePath(String value) {
+    final normalized = p.normalize(value);
+    if (p.isAbsolute(value) ||
+        p.isAbsolute(normalized) ||
+        normalized == '..' ||
+        normalized.startsWith('../')) {
+      throw ArgumentError('Path must stay within project root: $value');
+    }
+    return normalized;
+  }
+}
