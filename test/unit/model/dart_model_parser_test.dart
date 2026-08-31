@@ -251,4 +251,246 @@ class ReportModel {
     expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
     expect(result.spec!.classes.single.fields.single.jsonKey, 'id');
   });
+
+  test('preserves uncertain same-name members and copyWith exactly', () {
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        id: (json?["id"] ?? "").toString(),
+      );
+
+  bool get empty => id.isEmpty;
+
+  set empty(bool value) {}
+
+  Map<String, dynamic> toJson(int version) => {
+        "id": id,
+        "version": version,
+      };
+
+  List<ReportModel> fromJsonList(int version) => [this];
+
+  ReportModel copyWith({String? id}) {
+    return ReportModel(id: id ?? this.id);
+  }
+}
+''';
+
+    final result = parser.parse(source, 'custom_members_model.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    final model = result.spec!.classes.single;
+    expect(model.hasCopyWith, isTrue);
+    expect(model.preservedMembers, [
+      'bool get empty => id.isEmpty;',
+      'set empty(bool value) {}',
+      '''Map<String, dynamic> toJson(int version) => {
+        "id": id,
+        "version": version,
+      };''',
+      'List<ReportModel> fromJsonList(int version) => [this];',
+      '''ReportModel copyWith({String? id}) {
+    return ReportModel(id: id ?? this.id);
+  }''',
+    ]);
+  });
+
+  test('omits only supported structural method signatures', () {
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        id: (json?["id"] ?? "").toString(),
+      );
+
+  Map<String, dynamic> toJson() => {"id": id};
+
+  static List<ReportModel> fromJsonList(dynamic json) => [];
+}
+''';
+
+    final result = parser.parse(source, 'structural_members_model.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    expect(result.spec!.classes.single.preservedMembers, isEmpty);
+  });
+
+  test('ignores incidental construction and refuses a cached return', () {
+    const source = '''
+final cachedReport = ReportModel(id: "cached");
+
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+    ReportModel(id: (json?["incidental"] ?? "").toString());
+    return cachedReport;
+  }
+}
+''';
+
+    final result = parser.parse(source, 'cached_return_model.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.fromJson'));
+  });
+
+  test('refuses multiple returned constructions as ambiguous', () {
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+    if (json == null) {
+      return ReportModel(id: "missing");
+    }
+    return ReportModel(id: (json["id"] ?? "").toString());
+  }
+}
+''';
+
+    final result = parser.parse(source, 'multiple_returns_model.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.fromJson'));
+  });
+
+  test('refuses a wrapped unsupported return expression', () {
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => choose(
+        ReportModel(id: (json?["id"] ?? "").toString()),
+      );
+}
+
+ReportModel choose(ReportModel value) => value;
+''';
+
+    final result = parser.parse(source, 'wrapped_return_model.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.fromJson'));
+  });
+
+  test('refuses a call to an undeclared named constructor', () {
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      ReportModel.unknown(id: (json?["id"] ?? "").toString());
+}
+''';
+
+    final result = parser.parse(source, 'unknown_constructor_model.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.fromJson'));
+  });
+
+  test('uses the actual block return and records literal source offsets', () {
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel._({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+    final fallback = ReportModel._(id: "fallback");
+    fallback.toString();
+    return ReportModel._(
+      id: (json?["id"] ?? "").toString(),
+    );
+  }
+}
+''';
+
+    final result = parser.parse(source, 'block_return_model.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    final model = result.spec!.classes.single;
+    expect(model.sourceOffset, 0);
+    expect(model.fields.single.sourceOffset, 35);
+    expect(model.fields.single.jsonKey, 'id');
+  });
+
+  test('refuses duplicate final field names for the complete file', () {
+    const source = '''
+class ReportModel {
+  final String id;
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        id: (json?["id"] ?? "").toString(),
+      );
+}
+''';
+
+    final result = parser.parse(source, 'duplicate_field_model.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.id'));
+  });
+
+  test('discovers the leaf key through a parenthesized index receiver', () {
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        id: ((json?["payload"])["id"] ?? "").toString(),
+      );
+}
+''';
+
+    final result = parser.parse(source, 'parenthesized_key_model.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    expect(result.spec!.classes.single.fields.single.jsonKey, 'id');
+  });
+
+  test('discovers the leaf key through a null-checked index receiver', () {
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic> json) => ReportModel(
+        id: (json["payload"]!["id"] ?? "").toString(),
+      );
+}
+''';
+
+    final result = parser.parse(source, 'null_checked_key_model.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    expect(result.spec!.classes.single.fields.single.jsonKey, 'id');
+  });
 }

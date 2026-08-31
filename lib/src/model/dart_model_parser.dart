@@ -137,6 +137,7 @@ final class DartModelParser {
   ) {
     final className = declaration.name.lexeme;
     final fields = <_ParsedField>[];
+    final fieldNames = <String>{};
     final preservedMembers = <String>[];
     var hasCopyWith = false;
     final converterNames = {
@@ -163,6 +164,12 @@ final class DartModelParser {
         final type = member.fields.type;
         for (final variable in member.fields.variables) {
           final fieldName = variable.name.lexeme;
+          if (!fieldNames.add(fieldName)) {
+            diagnostics.add(
+              'Duplicate model field $className.$fieldName in $path.',
+            );
+            continue;
+          }
           if (variable.initializer != null) {
             diagnostics.add(
               'Unsupported initialized model field '
@@ -207,7 +214,7 @@ final class DartModelParser {
           preservedMembers.add(_sourceSlice(source, member));
           continue;
         }
-        if (_structuralMethodNames.contains(name)) {
+        if (_isSupportedStructuralMethod(member, className)) {
           continue;
         }
       }
@@ -317,16 +324,6 @@ final class DartModelParser {
       sourceOffset: declaration.offset,
     );
   }
-
-  static const _structuralMethodNames = {
-    'empty',
-    'fromJson',
-    'toJson',
-    'fromJsonList',
-    'listFromJson',
-    'toJsonList',
-    'listToJson',
-  };
 }
 
 _FieldShape? _fieldShape(NamedType type, Set<String> enumNames) {
@@ -425,11 +422,31 @@ ArgumentList? _returnedClassArguments(
   String className,
   Set<String> namedConstructorNames,
 ) {
-  final visitor = _ClassInvocationVisitor(className, namedConstructorNames);
-  body.accept(visitor);
-  return visitor.argumentLists.length == 1
-      ? visitor.argumentLists.single
-      : null;
+  if (body is ExpressionFunctionBody) {
+    return _classConstructionArguments(
+      body.expression,
+      className,
+      namedConstructorNames,
+    );
+  }
+  if (body is! BlockFunctionBody) {
+    return null;
+  }
+
+  final visitor = _ReturnStatementVisitor();
+  body.block.accept(visitor);
+  if (visitor.returns.length != 1) {
+    return null;
+  }
+  final expression = visitor.returns.single.expression;
+  if (expression == null) {
+    return null;
+  }
+  return _classConstructionArguments(
+    expression,
+    className,
+    namedConstructorNames,
+  );
 }
 
 Set<String> _terminalJsonKeys(Expression expression) {
@@ -474,50 +491,30 @@ final class _FieldShape {
   final String? nestedType;
 }
 
-final class _ClassInvocationVisitor extends RecursiveAstVisitor<void> {
-  _ClassInvocationVisitor(this.className, this.namedConstructorNames);
-
-  final String className;
-  final Set<String> namedConstructorNames;
-  final List<ArgumentList> argumentLists = [];
-
-  @override
-  void visitInstanceCreationExpression(InstanceCreationExpression node) {
-    if (node.constructorName.type.name2.lexeme == className) {
-      argumentLists.add(node.argumentList);
-    }
-    super.visitInstanceCreationExpression(node);
-  }
-
-  @override
-  void visitMethodInvocation(MethodInvocation node) {
-    final target = node.target;
-    final invokesDefaultConstructor =
-        target == null && node.methodName.name == className;
-    final invokesNamedConstructor = target is SimpleIdentifier &&
-        target.name == className &&
-        namedConstructorNames.contains(node.methodName.name);
-    if (invokesDefaultConstructor || invokesNamedConstructor) {
-      argumentLists.add(node.argumentList);
-    }
-    super.visitMethodInvocation(node);
-  }
-}
-
 final class _JsonKeyVisitor extends RecursiveAstVisitor<void> {
   final Set<String> keys = {};
 
   @override
   void visitIndexExpression(IndexExpression node) {
-    final parent = node.parent;
-    final isIndexedAgain = parent is IndexExpression && parent.target == node;
     final index = node.index;
-    if (!isIndexedAgain &&
+    if (!_isIntermediateIndexReceiver(node) &&
         _jsonTargetDepth(node.realTarget) != null &&
         index is SimpleStringLiteral) {
       keys.add(index.value);
     }
     super.visitIndexExpression(node);
+  }
+}
+
+final class _ReturnStatementVisitor extends RecursiveAstVisitor<void> {
+  final List<ReturnStatement> returns = [];
+
+  @override
+  void visitFunctionExpression(FunctionExpression node) {}
+
+  @override
+  void visitReturnStatement(ReturnStatement node) {
+    returns.add(node);
   }
 }
 
@@ -551,4 +548,134 @@ int? _jsonTargetDepth(Expression expression) {
     return depth == null ? null : depth + 1;
   }
   return null;
+}
+
+ArgumentList? _classConstructionArguments(
+  Expression expression,
+  String className,
+  Set<String> namedConstructorNames,
+) {
+  final unwrapped = _unwrapParentheses(expression);
+  if (unwrapped is InstanceCreationExpression) {
+    final constructor = unwrapped.constructorName;
+    if (constructor.type.name2.lexeme != className) {
+      return null;
+    }
+    final constructorName = constructor.name?.name;
+    if (constructorName != null &&
+        !namedConstructorNames.contains(constructorName)) {
+      return null;
+    }
+    return unwrapped.argumentList;
+  }
+  if (unwrapped is! MethodInvocation) {
+    return null;
+  }
+
+  final target = unwrapped.target;
+  final invokesDefaultConstructor =
+      target == null && unwrapped.methodName.name == className;
+  final invokesNamedConstructor = target is SimpleIdentifier &&
+      target.name == className &&
+      namedConstructorNames.contains(unwrapped.methodName.name);
+  return invokesDefaultConstructor || invokesNamedConstructor
+      ? unwrapped.argumentList
+      : null;
+}
+
+Expression _unwrapParentheses(Expression expression) {
+  var current = expression;
+  while (current is ParenthesizedExpression) {
+    current = current.expression;
+  }
+  return current;
+}
+
+bool _isIntermediateIndexReceiver(IndexExpression node) {
+  AstNode receiver = node;
+  AstNode? parent = receiver.parent;
+  while (true) {
+    if (parent is ParenthesizedExpression && parent.expression == receiver) {
+      receiver = parent;
+      parent = receiver.parent;
+      continue;
+    }
+    if (parent is PostfixExpression &&
+        parent.operand == receiver &&
+        parent.operator.lexeme == '!') {
+      receiver = parent;
+      parent = receiver.parent;
+      continue;
+    }
+    break;
+  }
+  return parent is IndexExpression && parent.target == receiver;
+}
+
+bool _isSupportedStructuralMethod(
+  MethodDeclaration method,
+  String className,
+) {
+  if (method.isGetter ||
+      method.isSetter ||
+      method.isOperator ||
+      method.isAbstract ||
+      method.externalKeyword != null ||
+      method.typeParameters != null) {
+    return false;
+  }
+  final parameters = method.parameters;
+  if (parameters == null) {
+    return false;
+  }
+
+  switch (method.name.lexeme) {
+    case 'empty':
+      return method.isStatic &&
+          parameters.parameters.isEmpty &&
+          _typeSourceIs(method.returnType, className);
+    case 'toJson':
+      return !method.isStatic &&
+          parameters.parameters.isEmpty &&
+          _typeSourceIs(method.returnType, 'Map<String, dynamic>');
+    case 'fromJsonList':
+    case 'listFromJson':
+      return method.isStatic &&
+          _hasSingleRequiredParameterOfType(parameters, 'dynamic') &&
+          _typeSourceIs(method.returnType, 'List<$className>');
+    case 'toJsonList':
+    case 'listToJson':
+      return method.isStatic &&
+          _hasSingleRequiredParameterOfType(
+            parameters,
+            'List<$className>',
+          ) &&
+          _typeSourceIs(
+            method.returnType,
+            'List<Map<String, dynamic>>',
+          );
+    default:
+      return false;
+  }
+}
+
+bool _hasSingleRequiredParameterOfType(
+  FormalParameterList parameters,
+  String typeSource,
+) {
+  if (parameters.parameters.length != 1) {
+    return false;
+  }
+  final parameter = parameters.parameters.single;
+  if (!parameter.isRequiredPositional) {
+    return false;
+  }
+  final normal =
+      parameter is DefaultFormalParameter ? parameter.parameter : parameter;
+  return normal is SimpleFormalParameter &&
+      _typeSourceIs(normal.type, typeSource);
+}
+
+bool _typeSourceIs(TypeAnnotation? type, String source) {
+  return type is NamedType && type.toSource() == source;
 }
