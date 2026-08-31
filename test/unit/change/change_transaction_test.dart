@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:gold_flutter/src/change/change_plan.dart';
@@ -780,6 +781,122 @@ void main() {
     expect(fixture.file('lib/new.dart').readAsStringSync(), 'new');
   });
 
+  test('matches an unchanged UTF-8 BOM file using decoded text semantics',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final file = fixture.file('lib/existing.dart');
+    await file.parent.create(recursive: true);
+    await file.writeAsBytes([..._utf8Bom, ...utf8.encode('before')]);
+    final previewed = await file.readAsString();
+    expect(previewed, 'before');
+    final plan = ChangePlan(
+      summary: 'guard BOM text',
+      projectRoot: fixture.root,
+      files: [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'update existing',
+          precondition: TextFilePrecondition.exact(previewed),
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: FakeProcessExecutor(const {}),
+    ).execute(plan);
+
+    expect(report.success, isTrue);
+    expect(report.modified, ['lib/existing.dart']);
+    expect(file.readAsStringSync(), 'after');
+  });
+
+  test('rejects a genuine text change in a UTF-8 BOM file', () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final file = fixture.file('lib/existing.dart');
+    await file.parent.create(recursive: true);
+    await file.writeAsBytes([..._utf8Bom, ...utf8.encode('before')]);
+    final previewed = await file.readAsString();
+    final plan = ChangePlan(
+      summary: 'guard changed BOM text',
+      projectRoot: fixture.root,
+      files: [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'would update',
+          precondition: TextFilePrecondition.exact(previewed),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['analyze'],
+          reason: 'must not run',
+          mutatesFiles: false,
+        ),
+      ],
+    );
+    await file.writeAsBytes([..._utf8Bom, ...utf8.encode('changed')]);
+    final executor = FakeProcessExecutor.success({
+      'flutter analyze': 'No issues found',
+    });
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('lib/existing.dart'));
+    expect(report.output, contains('original content changed'));
+    expect(file.readAsStringSync(), 'changed');
+  });
+
+  test('fails a text precondition closed for invalid UTF-8 bytes', () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final file = fixture.file('lib/existing.dart');
+    await file.parent.create(recursive: true);
+    await file.writeAsBytes(const [0xff, 0xfe, 0xfd]);
+    final executor = FakeProcessExecutor.success({
+      'flutter analyze': 'No issues found',
+    });
+    final plan = ChangePlan(
+      summary: 'guard invalid text',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'must not update',
+          precondition: TextFilePrecondition.exact('previewed'),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['analyze'],
+          reason: 'must not run',
+          mutatesFiles: false,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('lib/existing.dart'));
+    expect(report.output, contains('invalid UTF-8'));
+    expect(await file.readAsBytes(), const [0xff, 0xfe, 0xfd]);
+  });
+
   test('creates and modifies files and reports successful commands', () async {
     final fixture = await ProjectFixture.create(
       files: {'lib/existing.dart': 'old'},
@@ -1192,6 +1309,8 @@ void main() {
     expect(report.output, contains('snapshot cleanup failed'));
   });
 }
+
+const _utf8Bom = [0xef, 0xbb, 0xbf];
 
 final class _CallbackProcessExecutor implements ProcessExecutor {
   _CallbackProcessExecutor(this.callback);

@@ -320,8 +320,16 @@ final class ChangeTransaction {
             );
           }
           final bytes = await fileSystem.readBytes(path);
-          final expected = utf8.encode(precondition.expectedContent!);
-          if (!_bytesEqual(bytes, expected)) {
+          late final String actualContent;
+          try {
+            actualContent = utf8.decode(bytes);
+          } on FormatException {
+            throw StateError(
+              'File precondition failed for ${change.relativePath}: '
+              'actual file contains invalid UTF-8 text.',
+            );
+          }
+          if (actualContent != precondition.expectedContent!) {
             throw StateError(
               'File precondition failed for ${change.relativePath}: '
               'original content changed after planning.',
@@ -613,18 +621,6 @@ final class ChangeTransaction {
     }
     return true;
   }
-}
-
-bool _bytesEqual(List<int> left, List<int> right) {
-  if (left.length != right.length) {
-    return false;
-  }
-  for (var index = 0; index < left.length; index++) {
-    if (left[index] != right[index]) {
-      return false;
-    }
-  }
-  return true;
 }
 
 enum _CommandEffect { readOnly, mutating }

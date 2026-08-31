@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:gold_flutter/src/change/change_plan.dart';
@@ -520,7 +521,56 @@ void main() {
       originalTest,
     );
   });
+
+  test('applies unchanged BOM-backed model and owned-test preconditions',
+      () async {
+    const originalTest =
+        '${ModelTestRenderer.ownershipMarker}\nold generated test\n';
+    final fixture = await ProjectFixture.create(
+      files: {
+        'lib/domain/models/report_model.dart': _supportedModel,
+        'test/domain/models/report_model_test.dart': originalTest,
+      },
+    );
+    addTearDown(fixture.dispose);
+    await fixture.file('lib/domain/models/report_model.dart').writeAsBytes(
+      [..._utf8Bom, ...utf8.encode(_supportedModel)],
+    );
+    await fixture
+        .file('test/domain/models/report_model_test.dart')
+        .writeAsBytes([..._utf8Bom, ...utf8.encode(originalTest)]);
+    final plan = await arranger.plan(
+      project: _inspection(fixture),
+      path: 'lib/domain/models/report_model.dart',
+      addCopyWith: false,
+      addTest: true,
+    );
+    expect(plan.files[0].precondition?.expectedContent, _supportedModel);
+    expect(plan.files[1].precondition?.expectedContent, originalTest);
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/domain/models/report_model.dart '
+          'test/domain/models/report_model_test.dart': 'formatted',
+      'flutter analyze': 'No issues found',
+      'flutter test test/domain/models/report_model_test.dart': 'passed',
+    });
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isTrue);
+    expect(report.modified, [
+      'lib/domain/models/report_model.dart',
+      'test/domain/models/report_model_test.dart',
+    ]);
+    expect(executor.calls, [
+      'dart format lib/domain/models/report_model.dart '
+          'test/domain/models/report_model_test.dart',
+      'flutter analyze',
+      'flutter test test/domain/models/report_model_test.dart',
+    ]);
+  });
 }
+
+const _utf8Bom = [0xef, 0xbb, 0xbf];
 
 ProjectInspection _inspection(ProjectFixture fixture) => ProjectInspection(
       root: fixture.root,
