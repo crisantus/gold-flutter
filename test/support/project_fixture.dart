@@ -23,7 +23,7 @@ final class ProjectFixture {
     return fixture;
   }
 
-  File file(String relativePath) => File(p.join(root.path, relativePath));
+  File file(String relativePath) => File(_validatedPath(relativePath));
 
   Future<void> write(String relativePath, String content) async {
     final target = file(relativePath);
@@ -32,4 +32,26 @@ final class ProjectFixture {
   }
 
   Future<void> dispose() => root.delete(recursive: true);
+
+  String _validatedPath(String relativePath) {
+    if (p.isAbsolute(relativePath)) {
+      throw ArgumentError.value(
+        relativePath,
+        'relativePath',
+        'must be a relative path within the fixture root',
+      );
+    }
+
+    final rootPath = p.normalize(root.path);
+    final targetPath = p.normalize(p.join(rootPath, relativePath));
+    final pathFromRoot = p.relative(targetPath, from: rootPath);
+    if (pathFromRoot == '..' || pathFromRoot.startsWith('..${p.separator}')) {
+      throw ArgumentError.value(
+        relativePath,
+        'relativePath',
+        'must remain within the fixture root',
+      );
+    }
+    return targetPath;
+  }
 }
