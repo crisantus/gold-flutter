@@ -40,16 +40,16 @@ void main() {
     ChangePlanPresenter(io: io).print(plan);
 
     expect(io.output, [
-      'Update the project',
+      "'Update the project'",
       'Create',
-      '  lib/new.dart — Add the new feature',
+      "  'lib/new.dart' — 'Add the new feature'",
       'Modify',
-      '  lib/existing.dart — Update the existing feature',
+      "  'lib/existing.dart' — 'Update the existing feature'",
       'Run',
-      '  dart format . — Format generated files',
+      "  'dart' 'format' '.' — 'Format generated files'",
       'Snapshot',
-      '  lib',
-      '  test',
+      "  'lib'",
+      "  'test'",
     ]);
   });
 
@@ -62,7 +62,51 @@ void main() {
 
     ChangePlanPresenter(io: io).print(emptyPlan);
 
-    expect(io.output, ['Nothing to do']);
+    expect(io.output, ["'Nothing to do'"]);
+  });
+
+  test('quotes and escapes every untrusted preview field onto one line', () {
+    final io = FakePromptIO();
+    final adversarialPlan = ChangePlan(
+      summary: 'Summary\nCreate\u001b[31m',
+      projectRoot: Directory('/work/app'),
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/file with spaces.dart',
+          content: '',
+          kind: FileChangeKind.create,
+          reason: 'reason\r\nModify\t\u0007',
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'tool\nSnapshot',
+          arguments: const [
+            'first argument',
+            r'$(touch forged)',
+            '"double"',
+            "single'quote",
+          ],
+          reason: 'run\u001b[2Jreason',
+          mutatesFiles: false,
+        ),
+      ],
+      snapshotRoots: const ['generated output'],
+    );
+
+    ChangePlanPresenter(io: io).print(adversarialPlan);
+
+    expect(io.output, [
+      r"'Summary\nCreate\x1b[31m'",
+      'Create',
+      r"  'lib/file with spaces.dart' — 'reason\r\nModify\t\x07'",
+      'Run',
+      r"""  'tool\nSnapshot' 'first argument' '$(touch forged)' '\"double\"' 'single\'quote' — 'run\x1b[2Jreason'""",
+      'Snapshot',
+      "  'generated output'",
+    ]);
+    expect(
+        io.output, everyElement(isNot(anyOf(contains('\n'), contains('\r')))));
   });
 
   test('dry run prints files and never consumes confirmation input', () {

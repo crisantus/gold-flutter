@@ -29,7 +29,7 @@ final class ChangeTransaction {
     var mutationStarted = false;
 
     try {
-      await _validateMutatingCommands(plan);
+      final commandEffects = await _validateCommands(plan);
       await _validateDeclaredPaths(plan);
       await _recordMissingParentDirectories(
         plan,
@@ -41,8 +41,7 @@ final class ChangeTransaction {
       await _snapshot(plan, snapshotDirectory, snapshots);
 
       for (final change in plan.files) {
-        final path = p.join(plan.projectRoot.path, change.relativePath);
-        await _rejectLinks(plan, change.relativePath);
+        var path = await _rejectLinks(plan, change.relativePath);
         final exists = await fileSystem.exists(path);
         if ((change.kind == FileChangeKind.create && exists) ||
             (change.kind == FileChangeKind.modify && !exists)) {
@@ -51,6 +50,7 @@ final class ChangeTransaction {
         }
 
         mutationStarted = true;
+        path = await _rejectLinks(plan, change.relativePath);
         await fileSystem.writeBytes(path, utf8.encode(change.content));
         switch (change.kind) {
           case FileChangeKind.create:
@@ -60,8 +60,9 @@ final class ChangeTransaction {
         }
       }
 
-      for (final command in plan.commands) {
-        if (command.mutatesFiles) {
+      for (var index = 0; index < plan.commands.length; index++) {
+        final command = plan.commands[index];
+        if (commandEffects[index] == _CommandEffect.mutating) {
           mutationStarted = true;
         }
         final result = await executor.run(
@@ -90,6 +91,7 @@ final class ChangeTransaction {
         try {
           await _restore(
             plan.projectRoot.path,
+            snapshotDirectory!,
             snapshots,
             createdParentDirectories,
           );
@@ -128,36 +130,46 @@ final class ChangeTransaction {
   ) async {
     var index = 0;
     for (final change in plan.files) {
-      await _rejectLinks(plan, change.relativePath);
-      final original = p.join(plan.projectRoot.path, change.relativePath);
-      final backup = p.join(snapshotDirectory, 'file_${index++}');
+      var original = await _rejectLinks(plan, change.relativePath);
+      final backupName = 'file_${index++}';
       final existed = await fileSystem.exists(original);
       if (existed) {
-        await fileSystem.copyTree(original, backup);
+        original = await _rejectLinks(plan, change.relativePath);
+        final checkedBackup = _resolveContainedPath(
+          snapshotDirectory,
+          backupName,
+        );
+        await fileSystem.copyTree(original, checkedBackup);
       }
       snapshots.add(
         _Snapshot(
-          projectRoot: plan.projectRoot.path,
-          original: original,
-          backup: backup,
+          relativePath: change.relativePath,
+          backupName: backupName,
           existed: existed,
           isRoot: false,
         ),
       );
     }
     for (final relativeRoot in plan.snapshotRoots) {
-      await _rejectLinks(plan, relativeRoot, recursive: true);
-      final original = p.join(plan.projectRoot.path, relativeRoot);
-      final backup = p.join(snapshotDirectory, 'root_${index++}');
+      var original = await _rejectLinks(
+        plan,
+        relativeRoot,
+        recursive: true,
+      );
+      final backupName = 'root_${index++}';
       final existed = await fileSystem.exists(original);
       if (existed) {
-        await fileSystem.copyTree(original, backup);
+        original = await _rejectLinks(plan, relativeRoot, recursive: true);
+        final checkedBackup = _resolveContainedPath(
+          snapshotDirectory,
+          backupName,
+        );
+        await fileSystem.copyTree(original, checkedBackup);
       }
       snapshots.add(
         _Snapshot(
-          projectRoot: plan.projectRoot.path,
-          original: original,
-          backup: backup,
+          relativePath: relativeRoot,
+          backupName: backupName,
           existed: existed,
           isRoot: true,
         ),
@@ -167,22 +179,37 @@ final class ChangeTransaction {
 
   Future<void> _restore(
     String projectRoot,
+    String snapshotDirectory,
     List<_Snapshot> snapshots,
     List<String> createdParentDirectories,
   ) async {
     final failures = <Object>[];
     for (final snapshot in snapshots.where((entry) => entry.isRoot)) {
       try {
-        await _rejectAbsoluteProjectPath(
-          snapshot.projectRoot,
-          snapshot.original,
+        var original = await _rejectProjectPath(
+          projectRoot,
+          snapshot.relativePath,
           recursive: true,
         );
-        if (await fileSystem.exists(snapshot.original)) {
-          await fileSystem.delete(snapshot.original);
+        if (await fileSystem.exists(original)) {
+          original = await _rejectProjectPath(
+            projectRoot,
+            snapshot.relativePath,
+            recursive: true,
+          );
+          await fileSystem.delete(original);
         }
         if (snapshot.existed) {
-          await fileSystem.copyTree(snapshot.backup, snapshot.original);
+          final backup = _resolveContainedPath(
+            snapshotDirectory,
+            snapshot.backupName,
+          );
+          original = await _rejectProjectPath(
+            projectRoot,
+            snapshot.relativePath,
+            recursive: true,
+          );
+          await fileSystem.copyTree(backup, original);
         }
       } catch (error) {
         failures.add(error);
@@ -190,15 +217,27 @@ final class ChangeTransaction {
     }
     for (final snapshot in snapshots.where((entry) => !entry.isRoot)) {
       try {
-        await _rejectAbsoluteProjectPath(
-          snapshot.projectRoot,
-          snapshot.original,
+        var original = await _rejectProjectPath(
+          projectRoot,
+          snapshot.relativePath,
         );
         if (snapshot.existed) {
-          final bytes = await fileSystem.readBytes(snapshot.backup);
-          await fileSystem.writeBytes(snapshot.original, bytes);
-        } else if (await fileSystem.exists(snapshot.original)) {
-          await fileSystem.delete(snapshot.original);
+          final backup = _resolveContainedPath(
+            snapshotDirectory,
+            snapshot.backupName,
+          );
+          final bytes = await fileSystem.readBytes(backup);
+          original = await _rejectProjectPath(
+            projectRoot,
+            snapshot.relativePath,
+          );
+          await fileSystem.writeBytes(original, bytes);
+        } else if (await fileSystem.exists(original)) {
+          original = await _rejectProjectPath(
+            projectRoot,
+            snapshot.relativePath,
+          );
+          await fileSystem.delete(original);
         }
       } catch (error) {
         failures.add(error);
@@ -209,13 +248,18 @@ final class ChangeTransaction {
       );
     for (final parent in parents) {
       try {
-        await _rejectAbsoluteProjectPath(
+        var parentPath = await _rejectProjectPath(
           projectRoot,
           parent,
           recursive: true,
         );
-        if (await fileSystem.exists(parent)) {
-          await fileSystem.delete(parent);
+        if (await fileSystem.exists(parentPath)) {
+          parentPath = await _rejectProjectPath(
+            projectRoot,
+            parent,
+            recursive: true,
+          );
+          await fileSystem.delete(parentPath);
         }
       } catch (error) {
         failures.add(error);
@@ -257,43 +301,47 @@ final class ChangeTransaction {
   ) async {
     final seen = <String>{};
     for (final change in plan.files) {
-      var current = plan.projectRoot.path;
-      final segments = p.split(change.relativePath);
+      var current = '.';
+      final relativePath = ChangePlan.normalizeRelativePath(
+        change.relativePath,
+      );
+      final segments = p.posix.split(relativePath);
       for (final segment in segments.take(segments.length - 1)) {
-        current = p.join(current, segment);
-        if (!await fileSystem.exists(current) && seen.add(current)) {
+        current = p.posix.join(current, segment);
+        final target = _resolveProjectPath(plan.projectRoot.path, current);
+        if (!await fileSystem.exists(target) && seen.add(current)) {
           missingParents.add(current);
         }
       }
     }
   }
 
-  Future<void> _rejectLinks(
+  Future<String> _rejectLinks(
     ChangePlan plan,
     String relativePath, {
     bool recursive = false,
   }) =>
-      _rejectAbsoluteProjectPath(
+      _rejectProjectPath(
         plan.projectRoot.path,
-        p.join(plan.projectRoot.path, relativePath),
-        relativePath: relativePath,
+        relativePath,
         recursive: recursive,
       );
 
-  Future<void> _rejectAbsoluteProjectPath(
+  Future<String> _rejectProjectPath(
     String projectRoot,
-    String target, {
-    String? relativePath,
+    String relativePath, {
     bool recursive = false,
   }) async {
-    final displayPath = relativePath ?? p.relative(target, from: projectRoot);
-    if (await fileSystem.isLink(projectRoot)) {
+    final displayPath = ChangePlan.normalizeRelativePath(relativePath);
+    final root = p.normalize(p.absolute(projectRoot));
+    final target = _resolveProjectPath(root, displayPath);
+    if (await fileSystem.isLink(root)) {
       throw StateError(
         'Project path contains a symbolic link: $displayPath',
       );
     }
-    var current = projectRoot;
-    for (final segment in p.split(displayPath)) {
+    var current = root;
+    for (final segment in p.posix.split(displayPath)) {
       if (segment == '.') {
         continue;
       }
@@ -311,10 +359,46 @@ final class ChangeTransaction {
         'Snapshot root contains a symbolic link: $displayPath',
       );
     }
+    return target;
   }
 
-  Future<void> _validateMutatingCommands(ChangePlan plan) async {
-    for (final command in plan.commands.where((entry) => entry.mutatesFiles)) {
+  static String _resolveProjectPath(String projectRoot, String relativePath) {
+    final normalized = ChangePlan.normalizeRelativePath(relativePath);
+    final root = p.normalize(p.absolute(projectRoot));
+    final target = _resolveContainedPath(root, normalized);
+    if (!p.equals(root, target) && !p.isWithin(root, target)) {
+      throw StateError('Path must stay within project root: $relativePath');
+    }
+    return target;
+  }
+
+  static String _resolveContainedPath(String root, String relativePath) {
+    final normalized = ChangePlan.normalizeRelativePath(relativePath);
+    final absoluteRoot = p.normalize(p.absolute(root));
+    final target = p.normalize(
+      p.joinAll([absoluteRoot, ...p.posix.split(normalized)]),
+    );
+    if (!p.equals(absoluteRoot, target) && !p.isWithin(absoluteRoot, target)) {
+      throw StateError('Path must stay within owned root: $relativePath');
+    }
+    return target;
+  }
+
+  Future<List<_CommandEffect>> _validateCommands(ChangePlan plan) async {
+    final effects = <_CommandEffect>[];
+    for (final command in plan.commands) {
+      final knownMutation = _isKnownMutation(command);
+      if (knownMutation && !command.mutatesFiles) {
+        throw StateError(
+          'Known mutating command is marked non-mutating: '
+          '${[command.executable, ...command.arguments].join(' ')}',
+        );
+      }
+      if (!command.mutatesFiles) {
+        effects.add(_CommandEffect.readOnly);
+        continue;
+      }
+
       for (final argument in command.arguments) {
         if (_hasUnsafeCommandCharacters(argument)) {
           throw StateError(
@@ -344,7 +428,22 @@ final class ChangeTransaction {
           '${[command.executable, ...command.arguments].join(' ')}',
         );
       }
+      effects.add(_CommandEffect.mutating);
     }
+    return effects;
+  }
+
+  static bool _isKnownMutation(PlannedCommand command) {
+    if (command.executable == 'dart') {
+      return command.arguments.firstOrNull == 'format' ||
+          _startsWith(command.arguments, const ['pub', 'get']) ||
+          _startsWith(
+            command.arguments,
+            const ['run', 'build_runner', 'build'],
+          );
+    }
+    return command.executable == 'flutter' &&
+        _startsWith(command.arguments, const ['pub', 'get']);
   }
 
   static void _validateDartFormat(
@@ -454,7 +553,7 @@ final class ChangeTransaction {
     if (value.contains('\u0000') ||
         value.contains('\n') ||
         value.contains('\r') ||
-        RegExp(r'[;&|<>`]').hasMatch(value) ||
+        RegExp(r'''[%!^"';&|<>()`]''').hasMatch(value) ||
         value.contains(r'$(')) {
       return true;
     }
@@ -474,18 +573,18 @@ final class ChangeTransaction {
   }
 }
 
+enum _CommandEffect { readOnly, mutating }
+
 final class _Snapshot {
   const _Snapshot({
-    required this.projectRoot,
-    required this.original,
-    required this.backup,
+    required this.relativePath,
+    required this.backupName,
     required this.existed,
     required this.isRoot,
   });
 
-  final String projectRoot;
-  final String original;
-  final String backup;
+  final String relativePath;
+  final String backupName;
   final bool existed;
   final bool isRoot;
 }

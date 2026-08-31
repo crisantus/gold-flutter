@@ -90,14 +90,23 @@ final class ChangePlan {
     return normalized;
   }
 
-  static String _validateRelativePath(String value) {
-    final normalized = p.normalize(value);
+  static String normalizeRelativePath(String value) {
+    final portable = value.replaceAll('\\', '/');
+    final normalized = p.posix.normalize(portable);
     if (p.isAbsolute(value) ||
-        p.isAbsolute(normalized) ||
+        p.posix.isAbsolute(value) ||
+        p.windows.isAbsolute(value) ||
+        p.posix.isAbsolute(portable) ||
+        p.windows.isAbsolute(portable) ||
+        RegExp(r'^[a-zA-Z]:').hasMatch(value) ||
         normalized == '..' ||
-        normalized.startsWith('../')) {
+        normalized.startsWith('../') ||
+        RegExp(r'(^|[\\/])\.\.([\\/]|$)').hasMatch(value)) {
       throw ArgumentError('Path must stay within project root: $value');
     }
     return normalized;
   }
+
+  static String _validateRelativePath(String value) =>
+      normalizeRelativePath(value);
 }

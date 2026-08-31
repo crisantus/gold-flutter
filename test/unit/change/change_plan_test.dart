@@ -52,7 +52,7 @@ void main() {
       projectRoot: Directory('/work/app'),
       files: const [
         PlannedFileChange(
-          relativePath: './lib/../lib/first.dart',
+          relativePath: './lib/first.dart',
           content: 'first',
           kind: FileChangeKind.create,
           reason: 'first',
@@ -176,6 +176,68 @@ void main() {
         summary: 'duplicate snapshots',
         projectRoot: Directory('/work/app'),
         snapshotRoots: const ['./lib', 'lib/../lib'],
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('rejects Windows absolute and traversal planned file paths', () {
+    for (final unsafePath in const [
+      r'C:\outside.dart',
+      r'C:outside.dart',
+      r'D:/outside.dart',
+      r'\\server\share\outside.dart',
+      r'\rooted\outside.dart',
+      r'lib\..\outside.dart',
+      r'lib/..\outside.dart',
+    ]) {
+      expect(
+        () => ChangePlan(
+          summary: 'portable file containment',
+          projectRoot: Directory('/work/app'),
+          files: [
+            PlannedFileChange(
+              relativePath: unsafePath,
+              content: '',
+              kind: FileChangeKind.create,
+              reason: 'must remain contained',
+            ),
+          ],
+        ),
+        throwsArgumentError,
+        reason: 'Expected "$unsafePath" to be rejected on every host',
+      );
+    }
+  });
+
+  test('rejects Windows absolute and traversal snapshot roots', () {
+    for (final unsafeRoot in const [
+      r'C:\generated',
+      r'C:generated',
+      r'D:/generated',
+      r'\\server\share\generated',
+      r'\rooted\generated',
+      r'lib\..\generated',
+      r'lib/..\generated',
+    ]) {
+      expect(
+        () => ChangePlan(
+          summary: 'portable snapshot containment',
+          projectRoot: Directory('/work/app'),
+          snapshotRoots: [unsafeRoot],
+        ),
+        throwsArgumentError,
+        reason: 'Expected "$unsafeRoot" to be rejected on every host',
+      );
+    }
+  });
+
+  test('canonicalizes either separator before duplicate detection', () {
+    expect(
+      () => ChangePlan(
+        summary: 'portable duplicate',
+        projectRoot: Directory('/work/app'),
+        snapshotRoots: const [r'lib\generated', 'lib/generated'],
       ),
       throwsArgumentError,
     );

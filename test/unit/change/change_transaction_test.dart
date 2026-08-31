@@ -368,6 +368,162 @@ void main() {
     expect(report.output, contains('Unsupported mutating executable'));
   });
 
+  test('rejects known mutations mislabeled as non-mutating before start',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+
+    for (final command in [
+      PlannedCommand(
+        executable: 'dart',
+        arguments: const ['format', 'lib'],
+        reason: 'format source',
+        mutatesFiles: false,
+      ),
+      PlannedCommand(
+        executable: 'dart',
+        arguments: const ['run', 'build_runner', 'build'],
+        reason: 'generate source',
+        mutatesFiles: false,
+      ),
+      PlannedCommand(
+        executable: 'dart',
+        arguments: const ['pub', 'get'],
+        reason: 'resolve Dart packages',
+        mutatesFiles: false,
+      ),
+      PlannedCommand(
+        executable: 'flutter',
+        arguments: const ['pub', 'get'],
+        reason: 'resolve Flutter packages',
+        mutatesFiles: false,
+      ),
+    ]) {
+      final executor = FakeProcessExecutor(const {});
+      final plan = ChangePlan(
+        summary: 'misclassified mutation',
+        projectRoot: fixture.root,
+        commands: [command],
+      );
+
+      final report = await ChangeTransaction(executor: executor).execute(plan);
+
+      expect(report.success, isFalse);
+      expect(executor.calls, isEmpty);
+      expect(report.output, contains('marked non-mutating'));
+    }
+  });
+
+  test('rejects Windows cmd expansion characters before mutation start',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/existing.dart': 'old'},
+    );
+    addTearDown(fixture.dispose);
+
+    for (final unsafeTarget in const [
+      r'%TEMP%',
+      r'lib/"quoted".dart',
+      r'lib/^caret.dart',
+      r'lib/!delayed!.dart',
+      r'lib/(group).dart',
+      r"lib/'single'.dart",
+      r'lib/a&b.dart',
+      r'lib/a|b.dart',
+      r'lib/a<b.dart',
+      r'lib/a>b.dart',
+    ]) {
+      final executor = FakeProcessExecutor(const {});
+      final plan = ChangePlan(
+        summary: 'unsafe Windows argv',
+        projectRoot: fixture.root,
+        commands: [
+          PlannedCommand(
+            executable: 'dart',
+            arguments: ['format', unsafeTarget],
+            reason: 'format source',
+            mutatesFiles: true,
+          ),
+        ],
+        snapshotRoots: const ['lib'],
+      );
+
+      final report = await ChangeTransaction(executor: executor).execute(plan);
+
+      expect(report.success, isFalse);
+      expect(executor.calls, isEmpty);
+      expect(
+        report.output,
+        contains('unsafe argument'),
+        reason: 'Expected "$unsafeTarget" to be rejected before execution',
+      );
+    }
+  });
+
+  test('resolves Windows separators inside the project for transaction writes',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final plan = ChangePlan(
+      summary: 'portable write',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: r'lib\nested\created.dart',
+          content: 'created',
+          kind: FileChangeKind.create,
+          reason: 'portable path',
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: FakeProcessExecutor(const {}),
+    ).execute(plan);
+
+    expect(report.success, isTrue);
+    expect(report.created, ['lib/nested/created.dart']);
+    expect(
+        fixture.file('lib/nested/created.dart').readAsStringSync(), 'created');
+    expect(fixture.file(r'lib\nested\created.dart').existsSync(), isFalse);
+  });
+
+  test('reports create conflicts and missing modifies as skipped', () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/existing.dart': 'preserve me'},
+    );
+    addTearDown(fixture.dispose);
+    final plan = ChangePlan(
+      summary: 'skip conflicts',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'must not overwrite',
+          kind: FileChangeKind.create,
+          reason: 'conflicting create',
+        ),
+        PlannedFileChange(
+          relativePath: 'lib/missing.dart',
+          content: 'must not create',
+          kind: FileChangeKind.modify,
+          reason: 'missing modify',
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: FakeProcessExecutor(const {}),
+    ).execute(plan);
+
+    expect(report.success, isTrue);
+    expect(report.created, isEmpty);
+    expect(report.modified, isEmpty);
+    expect(report.skipped, ['lib/existing.dart', 'lib/missing.dart']);
+    expect(fixture.file('lib/existing.dart').readAsStringSync(), 'preserve me');
+    expect(fixture.file('lib/missing.dart').existsSync(), isFalse);
+  });
+
   test('creates and modifies files and reports successful commands', () async {
     final fixture = await ProjectFixture.create(
       files: {'lib/existing.dart': 'old'},
@@ -399,7 +555,7 @@ void main() {
           executable: 'dart',
           arguments: const ['format', 'lib'],
           reason: 'format',
-          mutatesFiles: false,
+          mutatesFiles: true,
         ),
         PlannedCommand(
           executable: 'flutter',
@@ -408,6 +564,7 @@ void main() {
           mutatesFiles: false,
         ),
       ],
+      snapshotRoots: const ['lib'],
     );
 
     final report = await ChangeTransaction(executor: executor).execute(plan);
