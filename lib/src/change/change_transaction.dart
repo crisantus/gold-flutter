@@ -29,7 +29,7 @@ final class ChangeTransaction {
     var mutationStarted = false;
 
     try {
-      _validateMutatingCommands(plan);
+      await _validateMutatingCommands(plan);
       await _validateDeclaredPaths(plan);
       await _recordMissingParentDirectories(
         plan,
@@ -313,32 +313,144 @@ final class ChangeTransaction {
     }
   }
 
-  static void _validateMutatingCommands(ChangePlan plan) {
-    final hasCoverage = plan.files.isNotEmpty || plan.snapshotRoots.isNotEmpty;
+  Future<void> _validateMutatingCommands(ChangePlan plan) async {
     for (final command in plan.commands.where((entry) => entry.mutatesFiles)) {
-      if (!hasCoverage) {
-        throw StateError(
-          'Mutating command requires declared rollback coverage: '
-          '${command.executable}',
-        );
+      for (final argument in command.arguments) {
+        if (_hasUnsafeCommandCharacters(argument)) {
+          throw StateError(
+            'Mutating command has unsafe argument: $argument',
+          );
+        }
       }
-      if (command.executable != 'dart' && command.executable != 'flutter') {
+      if (command.executable == 'dart' &&
+          command.arguments.firstOrNull == 'format') {
+        _validateDartFormat(plan, command.arguments);
+      } else if (command.executable == 'dart' &&
+          _startsWith(
+              command.arguments, const ['run', 'build_runner', 'build'])) {
+        await _validateBuildRunner(plan, command.arguments);
+      } else if ((command.executable == 'dart' ||
+              command.executable == 'flutter') &&
+          _startsWith(command.arguments, const ['pub', 'get'])) {
+        _validatePubGet(plan, command.arguments);
+      } else if (command.executable != 'dart' &&
+          command.executable != 'flutter') {
         throw StateError(
           'Unsupported mutating executable: ${command.executable}',
         );
-      }
-      for (final argument in command.arguments) {
-        final value = argument.contains('=')
-            ? argument.substring(argument.indexOf('=') + 1)
-            : argument;
-        if (_isUnsafeCommandPath(value)) {
-          throw StateError('Mutating command has unsafe path argument: $value');
-        }
+      } else {
+        throw StateError(
+          'Unsupported mutating command form: '
+          '${[command.executable, ...command.arguments].join(' ')}',
+        );
       }
     }
   }
 
-  static bool _isUnsafeCommandPath(String value) {
+  static void _validateDartFormat(
+    ChangePlan plan,
+    List<String> arguments,
+  ) {
+    final targets = <String>[];
+    for (final argument in arguments.skip(1)) {
+      if (!argument.startsWith('-')) {
+        _validatePositionalPath(argument);
+        targets.add(p.normalize(argument));
+        continue;
+      }
+      if (argument == '--fix' || argument == '--set-exit-if-changed') {
+        continue;
+      }
+      if (argument.startsWith('--output=')) {
+        final value = argument.substring('--output='.length);
+        if (value == 'show' || value == 'json' || value == 'none') {
+          continue;
+        }
+      }
+      if (argument.startsWith('--line-length=') ||
+          argument.startsWith('--page-width=')) {
+        final value = argument.substring(argument.indexOf('=') + 1);
+        if (RegExp(r'^\d+$').hasMatch(value)) {
+          continue;
+        }
+      }
+      throw StateError('Unsupported dart format option: $argument');
+    }
+    if (targets.isEmpty) {
+      throw StateError('Mutating dart format requires a declared target');
+    }
+    _requireCoverage(plan, targets);
+  }
+
+  Future<void> _validateBuildRunner(
+    ChangePlan plan,
+    List<String> arguments,
+  ) async {
+    for (final argument in arguments.skip(3)) {
+      if (argument != '--delete-conflicting-outputs') {
+        throw StateError('Unsupported build runner option: $argument');
+      }
+    }
+    final targets = <String>['pubspec.yaml', 'pubspec.lock'];
+    for (final sourceRoot in const ['lib', 'test']) {
+      final path = p.join(plan.projectRoot.path, sourceRoot);
+      if (await fileSystem.exists(path)) {
+        targets.add(sourceRoot);
+      }
+    }
+    _requireCoverage(plan, targets);
+  }
+
+  static void _validatePubGet(
+    ChangePlan plan,
+    List<String> arguments,
+  ) {
+    const supportedOptions = {
+      '--offline',
+      '--enforce-lockfile',
+      '--no-example',
+    };
+    for (final argument in arguments.skip(2)) {
+      if (!supportedOptions.contains(argument)) {
+        throw StateError('Unsupported pub get option: $argument');
+      }
+    }
+    _requireCoverage(plan, const ['pubspec.yaml', 'pubspec.lock']);
+  }
+
+  static void _requireCoverage(ChangePlan plan, Iterable<String> targets) {
+    final uncovered = targets
+        .map(p.normalize)
+        .where((target) => !_isCovered(plan, target))
+        .toList();
+    if (uncovered.isNotEmpty) {
+      throw StateError(
+        'Mutating command targets are not covered by rollback coverage: '
+        '${uncovered.join(', ')}',
+      );
+    }
+  }
+
+  static bool _isCovered(ChangePlan plan, String target) {
+    if (plan.files.any((file) => file.relativePath == target)) {
+      return true;
+    }
+    return plan.snapshotRoots.any((root) {
+      final relative = p.normalize(p.relative(target, from: root));
+      return relative == '.' ||
+          (relative != '..' && !relative.startsWith('..${p.separator}'));
+    });
+  }
+
+  static void _validatePositionalPath(String value) {
+    if (p.posix.isAbsolute(value) ||
+        p.windows.isAbsolute(value) ||
+        RegExp(r'(^|[\\/])\.\.([\\/]|$)').hasMatch(value)) {
+      throw StateError('Mutating command has unsafe path argument: $value');
+    }
+  }
+
+  static bool _hasUnsafeCommandCharacters(String value) {
     if (value.contains('\u0000') ||
         value.contains('\n') ||
         value.contains('\r') ||
@@ -346,10 +458,19 @@ final class ChangeTransaction {
         value.contains(r'$(')) {
       return true;
     }
-    if (p.posix.isAbsolute(value) || p.windows.isAbsolute(value)) {
-      return true;
+    return false;
+  }
+
+  static bool _startsWith(List<String> values, List<String> prefix) {
+    if (values.length < prefix.length) {
+      return false;
     }
-    return RegExp(r'(^|[\\/])\.\.([\\/]|$)').hasMatch(value);
+    for (var index = 0; index < prefix.length; index++) {
+      if (values[index] != prefix[index]) {
+        return false;
+      }
+    }
+    return true;
   }
 }
 

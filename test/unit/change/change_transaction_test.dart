@@ -66,7 +66,7 @@ void main() {
       commands: [
         PlannedCommand(
           executable: 'dart',
-          arguments: const ['run', 'build_runner'],
+          arguments: const ['format', 'generated'],
           reason: 'generate',
           mutatesFiles: true,
         ),
@@ -135,6 +135,210 @@ void main() {
     expect(report.success, isFalse);
     expect(executor.calls, isEmpty);
     expect(report.output, contains('unsafe path argument'));
+  });
+
+  test('rejects a dart format target outside its rollback coverage', () async {
+    final fixture = await ProjectFixture.create(
+      files: {
+        'lib/existing.dart': 'old',
+        'test/existing_test.dart': 'old test',
+      },
+    );
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({'dart format test': 'done'});
+    final plan = ChangePlan(
+      summary: 'unrelated coverage',
+      projectRoot: fixture.root,
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['format', 'test'],
+          reason: 'format tests',
+          mutatesFiles: true,
+        ),
+      ],
+      snapshotRoots: const ['lib'],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('not covered'));
+  });
+
+  test('rejects traversal before equals in a positional format target',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({
+      'dart format ../outside=target.dart': 'done',
+    });
+    final plan = ChangePlan(
+      summary: 'equals traversal',
+      projectRoot: fixture.root,
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['format', '../outside=target.dart'],
+          reason: 'unsafe format',
+          mutatesFiles: true,
+        ),
+      ],
+      snapshotRoots: const ['.'],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('unsafe path argument'));
+  });
+
+  test('rejects build runner without all source and config coverage', () async {
+    final fixture = await ProjectFixture.create(
+      files: {
+        'lib/source.dart': 'source',
+        'test/source_test.dart': 'test source',
+      },
+    );
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({
+      'dart run build_runner build': 'done',
+    });
+    final plan = ChangePlan(
+      summary: 'partial build coverage',
+      projectRoot: fixture.root,
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['run', 'build_runner', 'build'],
+          reason: 'generate',
+          mutatesFiles: true,
+        ),
+      ],
+      snapshotRoots: const ['lib'],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('test'));
+    expect(report.output, contains('pubspec.yaml'));
+    expect(report.output, contains('pubspec.lock'));
+  });
+
+  test('restores covered build runner roots including an absent lockfile',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {
+        'lib/source.dart': 'old lib',
+        'test/source_test.dart': 'old test',
+      },
+    );
+    addTearDown(fixture.dispose);
+    final originalPubspec = fixture.file('pubspec.yaml').readAsStringSync();
+    final executor = _CallbackProcessExecutor((_) async {
+      await fixture.file('lib/source.dart').writeAsString('new lib');
+      await fixture.file('test/source_test.dart').writeAsString('new test');
+      await fixture.file('pubspec.yaml').writeAsString('changed pubspec');
+      await fixture.file('pubspec.lock').writeAsString('created lock');
+      return const ProcessOutput(
+        exitCode: 1,
+        stdout: '',
+        stderr: 'build failed',
+      );
+    });
+    final plan = ChangePlan(
+      summary: 'covered build failure',
+      projectRoot: fixture.root,
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['run', 'build_runner', 'build'],
+          reason: 'generate',
+          mutatesFiles: true,
+        ),
+      ],
+      snapshotRoots: const [
+        'lib',
+        'test',
+        'pubspec.yaml',
+        'pubspec.lock',
+      ],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isTrue);
+    expect(fixture.file('lib/source.dart').readAsStringSync(), 'old lib');
+    expect(
+        fixture.file('test/source_test.dart').readAsStringSync(), 'old test');
+    expect(fixture.file('pubspec.yaml').readAsStringSync(), originalPubspec);
+    expect(fixture.file('pubspec.lock').existsSync(), isFalse);
+  });
+
+  test('requires pubspec and lockfile coverage for pub get', () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({'flutter pub get': 'done'});
+    final plan = ChangePlan(
+      summary: 'partial pub coverage',
+      projectRoot: fixture.root,
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['pub', 'get'],
+          reason: 'resolve packages',
+          mutatesFiles: true,
+        ),
+      ],
+      snapshotRoots: const ['pubspec.yaml'],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('pubspec.lock'));
+  });
+
+  test('restores covered pub get files including an absent lockfile', () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final originalPubspec = fixture.file('pubspec.yaml').readAsStringSync();
+    final executor = _CallbackProcessExecutor((_) async {
+      await fixture.file('pubspec.yaml').writeAsString('changed');
+      await fixture.file('pubspec.lock').writeAsString('created lock');
+      return const ProcessOutput(
+        exitCode: 1,
+        stdout: '',
+        stderr: 'pub get failed',
+      );
+    });
+    final plan = ChangePlan(
+      summary: 'covered pub failure',
+      projectRoot: fixture.root,
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['pub', 'get'],
+          reason: 'resolve packages',
+          mutatesFiles: true,
+        ),
+      ],
+      snapshotRoots: const ['pubspec.yaml', 'pubspec.lock'],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isTrue);
+    expect(fixture.file('pubspec.yaml').readAsStringSync(), originalPubspec);
+    expect(fixture.file('pubspec.lock').existsSync(), isFalse);
   });
 
   test('does not start a mutating shell command', () async {
@@ -343,7 +547,7 @@ void main() {
       commands: [
         PlannedCommand(
           executable: 'dart',
-          arguments: const ['run', 'build_runner'],
+          arguments: const ['format', 'generated'],
           reason: 'generate',
           mutatesFiles: true,
         ),
