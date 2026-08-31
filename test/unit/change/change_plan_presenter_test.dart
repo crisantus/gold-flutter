@@ -73,6 +73,7 @@ void main() {
     expect(presenter.confirm(assumeYes: false, dryRun: true), isFalse);
     expect(io.output.join('\n'), contains('No files have been changed.'));
     expect(io.prompts, isEmpty);
+    expect(io.reads, 0);
   });
 
   test('assume yes confirms without reading input', () {
@@ -83,35 +84,35 @@ void main() {
       isTrue,
     );
     expect(io.prompts, isEmpty);
+    expect(io.reads, 0);
   });
 
-  test('interactive confirmation accepts yes, no, and empty', () {
-    final yesIo = FakePromptIO(['YES']);
-    expect(
-      ChangePlanPresenter(io: yesIo).confirm(
-        assumeYes: false,
-        dryRun: false,
-      ),
-      isTrue,
-    );
+  test('interactive confirmation accepts y, yes, and empty', () {
+    for (final answer in ['y', 'yes', '']) {
+      final io = FakePromptIO([answer]);
+      expect(
+        ChangePlanPresenter(io: io).confirm(
+          assumeYes: false,
+          dryRun: false,
+        ),
+        isTrue,
+        reason: 'Expected "$answer" to confirm',
+      );
+    }
+  });
 
-    final noIo = FakePromptIO([' no ']);
-    expect(
-      ChangePlanPresenter(io: noIo).confirm(
-        assumeYes: false,
-        dryRun: false,
-      ),
-      isFalse,
-    );
-
-    final emptyIo = FakePromptIO(['']);
-    expect(
-      ChangePlanPresenter(io: emptyIo).confirm(
-        assumeYes: false,
-        dryRun: false,
-      ),
-      isTrue,
-    );
+  test('interactive confirmation accepts n and no', () {
+    for (final answer in ['n', 'no']) {
+      final io = FakePromptIO([answer]);
+      expect(
+        ChangePlanPresenter(io: io).confirm(
+          assumeYes: false,
+          dryRun: false,
+        ),
+        isFalse,
+        reason: 'Expected "$answer" to decline',
+      );
+    }
   });
 
   test('repeats after unrecognized input', () {
@@ -134,9 +135,13 @@ final class FakePromptIO implements PromptIO {
   final Iterator<String> _input;
   final List<String> prompts = [];
   final List<String> output = [];
+  int reads = 0;
 
   @override
-  String? readLine() => _input.moveNext() ? _input.current : null;
+  String? readLine() {
+    reads++;
+    return _input.moveNext() ? _input.current : null;
+  }
 
   @override
   void write(String message) => prompts.add(message);
