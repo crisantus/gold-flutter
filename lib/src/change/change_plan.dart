@@ -1,4 +1,3 @@
-import 'dart:collection';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -20,19 +19,19 @@ final class PlannedFileChange {
 }
 
 final class PlannedCommand {
-  const PlannedCommand({
+  PlannedCommand({
     required this.executable,
     required List<String> arguments,
     required this.reason,
     required this.mutatesFiles,
-  }) : _arguments = arguments;
+  }) : _arguments = List.unmodifiable(arguments);
 
   final String executable;
   final List<String> _arguments;
   final String reason;
   final bool mutatesFiles;
 
-  List<String> get arguments => UnmodifiableListView(_arguments);
+  List<String> get arguments => _arguments;
 }
 
 final class ChangePlan {

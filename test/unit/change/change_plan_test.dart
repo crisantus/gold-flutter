@@ -46,6 +46,7 @@ void main() {
   });
 
   test('normalizes paths and preserves operation ordering', () {
+    final arguments = ['format', '.'];
     final plan = ChangePlan(
       summary: 'ordered',
       projectRoot: Directory('/work/app'),
@@ -63,10 +64,10 @@ void main() {
           reason: 'second',
         ),
       ],
-      commands: const [
+      commands: [
         PlannedCommand(
           executable: 'dart',
-          arguments: ['format', '.'],
+          arguments: arguments,
           reason: 'format',
           mutatesFiles: true,
         ),
@@ -85,6 +86,20 @@ void main() {
     expect(plan.commands.single.mutatesFiles, isTrue);
   });
 
+  test('copies command arguments at construction', () {
+    final arguments = ['test'];
+    final command = PlannedCommand(
+      executable: 'dart',
+      arguments: arguments,
+      reason: 'verify',
+      mutatesFiles: false,
+    );
+
+    arguments.add('--reporter expanded');
+
+    expect(command.arguments, ['test']);
+  });
+
   test('exposes immutable plan collections', () {
     final plan = ChangePlan(
       summary: 'immutable',
@@ -97,7 +112,7 @@ void main() {
           reason: 'test',
         ),
       ],
-      commands: const [
+      commands: [
         PlannedCommand(
           executable: 'dart',
           arguments: ['test'],
@@ -121,6 +136,46 @@ void main() {
         summary: 'unsafe snapshot',
         projectRoot: Directory('/work/app'),
         snapshotRoots: const ['lib', '../../outside'],
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('rejects absolute file paths', () {
+    expect(
+      () => ChangePlan(
+        summary: 'absolute file',
+        projectRoot: Directory('/work/app'),
+        files: const [
+          PlannedFileChange(
+            relativePath: '/work/app/lib/a.dart',
+            content: '',
+            kind: FileChangeKind.create,
+            reason: 'invalid',
+          ),
+        ],
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('rejects absolute snapshot roots', () {
+    expect(
+      () => ChangePlan(
+        summary: 'absolute snapshot',
+        projectRoot: Directory('/work/app'),
+        snapshotRoots: const ['/work/app/lib'],
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('rejects duplicate snapshot roots after normalization', () {
+    expect(
+      () => ChangePlan(
+        summary: 'duplicate snapshots',
+        projectRoot: Directory('/work/app'),
+        snapshotRoots: const ['./lib', 'lib/../lib'],
       ),
       throwsArgumentError,
     );
