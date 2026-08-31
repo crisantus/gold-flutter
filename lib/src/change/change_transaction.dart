@@ -453,8 +453,7 @@ final class ChangeTransaction {
     final targets = <String>[];
     for (final argument in arguments.skip(1)) {
       if (!argument.startsWith('-')) {
-        _validatePositionalPath(argument);
-        targets.add(p.normalize(argument));
+        targets.add(_normalizePositionalPath(argument));
         continue;
       }
       if (argument == '--fix' || argument == '--set-exit-if-changed') {
@@ -519,7 +518,7 @@ final class ChangeTransaction {
 
   static void _requireCoverage(ChangePlan plan, Iterable<String> targets) {
     final uncovered = targets
-        .map(p.normalize)
+        .map(ChangePlan.normalizeRelativePath)
         .where((target) => !_isCovered(plan, target))
         .toList();
     if (uncovered.isNotEmpty) {
@@ -531,20 +530,27 @@ final class ChangeTransaction {
   }
 
   static bool _isCovered(ChangePlan plan, String target) {
-    if (plan.files.any((file) => file.relativePath == target)) {
+    final portableTarget = ChangePlan.normalizeRelativePath(target);
+    if (plan.files.any(
+      (file) =>
+          ChangePlan.normalizeRelativePath(file.relativePath) == portableTarget,
+    )) {
       return true;
     }
     return plan.snapshotRoots.any((root) {
-      final relative = p.normalize(p.relative(target, from: root));
+      final portableRoot = ChangePlan.normalizeRelativePath(root);
+      final relative = p.posix.normalize(
+        p.posix.relative(portableTarget, from: portableRoot),
+      );
       return relative == '.' ||
-          (relative != '..' && !relative.startsWith('..${p.separator}'));
+          (relative != '..' && !relative.startsWith('../'));
     });
   }
 
-  static void _validatePositionalPath(String value) {
-    if (p.posix.isAbsolute(value) ||
-        p.windows.isAbsolute(value) ||
-        RegExp(r'(^|[\\/])\.\.([\\/]|$)').hasMatch(value)) {
+  static String _normalizePositionalPath(String value) {
+    try {
+      return ChangePlan.normalizeRelativePath(value);
+    } on ArgumentError {
       throw StateError('Mutating command has unsafe path argument: $value');
     }
   }

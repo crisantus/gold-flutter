@@ -168,6 +168,79 @@ void main() {
     expect(report.output, contains('not covered'));
   });
 
+  test('accepts a Windows-style format target covered by an exact planned file',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/file.dart': 'before'},
+    );
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({
+      r'dart format lib\file.dart': 'formatted',
+    });
+    final plan = ChangePlan(
+      summary: 'portable exact coverage',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/file.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'update exact target',
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['format', r'lib\file.dart'],
+          reason: 'format exact target',
+          mutatesFiles: true,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isTrue);
+    expect(executor.calls, [r'dart format lib\file.dart']);
+    expect(fixture.file('lib/file.dart').readAsStringSync(), 'after');
+  });
+
+  test('rejects an adjacent Windows-style format target as uncovered',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/file.dart': 'before'},
+    );
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor(const {});
+    final plan = ChangePlan(
+      summary: 'portable adjacent coverage',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/file.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'update exact target',
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['format', r'lib\other.dart'],
+          reason: 'must not format adjacent target',
+          mutatesFiles: true,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('not covered'));
+    expect(fixture.file('lib/file.dart').readAsStringSync(), 'before');
+  });
+
   test('rejects traversal before equals in a positional format target',
       () async {
     final fixture = await ProjectFixture.create();
