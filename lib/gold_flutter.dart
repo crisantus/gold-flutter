@@ -14,6 +14,8 @@ export 'src/platform/app_identity.dart';
 export 'src/platform/platform_patcher.dart';
 export 'src/platform/repository_guard.dart';
 export 'src/process/process_executor.dart';
+export 'src/project/project_inspection.dart';
+export 'src/project/project_inspector.dart';
 export 'src/prompts/answers_collector.dart';
 export 'src/prompts/prompt_io.dart';
 export 'src/validation/input_validation.dart';
