@@ -1,0 +1,9 @@
+.dart_tool/
+.packages
+.idea/
+.vscode/
+build/
+coverage/
+*.iml
+.DS_Store
+.gold_flutter_*
