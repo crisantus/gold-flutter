@@ -16,7 +16,7 @@ final class GoldFlutterCli {
     ProjectGenerator? generator,
     Directory? currentDirectory,
   })  : _io = io,
-        _generator = generator ?? const PendingProjectGenerator(),
+        _generator = generator ?? DefaultProjectGenerator.standard(),
         _currentDirectory = currentDirectory ?? Directory.current;
 
   static const version = '0.1.0';
@@ -27,6 +27,13 @@ final class GoldFlutterCli {
 
   Future<int> run(List<String> arguments) async {
     final parser = _buildParser();
+    if (arguments.isNotEmpty &&
+        arguments.first == 'create' &&
+        arguments.any((argument) => argument == '--help' || argument == '-h')) {
+      _io.writeLine('Usage: gold_flutter create [options]');
+      _io.writeLine(parser.commands['create']!.usage);
+      return 0;
+    }
     late ArgResults results;
     try {
       results = parser.parse(arguments);
@@ -80,9 +87,17 @@ final class GoldFlutterCli {
       final answers = command['yes'] as bool
           ? _answersFromFlags(command)
           : AnswersCollector(io: _io).collect();
+      final outputDirectory = (command['output-directory'] as String?)?.trim();
+      final destinationParent =
+          outputDirectory == null || outputDirectory.isEmpty
+              ? _currentDirectory
+              : Directory(outputDirectory);
+      _io.writeLine(
+        'Creating ${answers.displayName}. This can take a few minutes...',
+      );
       final output = await _generator.generate(
         answers: answers,
-        destinationParent: _currentDirectory,
+        destinationParent: destinationParent,
       );
       _io.writeLine('Created ${answers.displayName} at ${output.path}');
       return 0;
@@ -166,6 +181,10 @@ final class GoldFlutterCli {
       ..addOption('display-name')
       ..addOption('project-name')
       ..addOption('application-id')
+      ..addOption(
+        'output-directory',
+        help: 'Parent directory that will contain the generated project.',
+      )
       ..addOption('platforms')
       ..addFlag('api', negatable: true)
       ..addOption('api-base-url')

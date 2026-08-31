@@ -58,6 +58,17 @@ void main() {
     expect(exitCode, 64);
     expect(io.output.single, contains('Unknown command'));
   });
+
+  test('create --help prints create options without prompting', () async {
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(io: io).run(['create', '--help']);
+
+    expect(exitCode, 0);
+    expect(io.prompts, isEmpty);
+    expect(io.output.join('\n'), contains('--display-name'));
+    expect(io.output.join('\n'), contains('--output-directory'));
+  });
 }
 
 final class _FakeProjectGenerator implements ProjectGenerator {

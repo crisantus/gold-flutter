@@ -51,6 +51,16 @@ account, SSH key, or access token:
 dart pub global activate --source git https://github.com/crisantus/gold-flutter.git
 ```
 
+On macOS or Linux, the repository also provides a convenience installer:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/crisantus/gold-flutter/main/scripts/install.sh
+bash install.sh
+```
+
+Review downloaded scripts before running them. The direct Dart activation
+command above remains the simplest transparent installation method.
+
 If your terminal cannot find `gold_flutter`, add Dart's global executable
 directory to your `PATH`.
 
