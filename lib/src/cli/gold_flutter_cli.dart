@@ -2,9 +2,13 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 
+import '../change/change_plan_presenter.dart';
+import '../change/change_transaction.dart';
 import '../config/project_answers.dart';
 import '../generator/project_generator.dart';
+import '../model/model_arranger.dart';
 import '../process/process_executor.dart';
+import '../project/project_inspector.dart';
 import '../prompts/answers_collector.dart';
 import '../prompts/prompt_io.dart';
 import '../validation/input_validation.dart';
@@ -15,15 +19,22 @@ final class GoldFlutterCli {
     required PromptIO io,
     ProjectGenerator? generator,
     Directory? currentDirectory,
+    ModelArranger? modelArranger,
+    ChangeTransaction? changeTransaction,
   })  : _io = io,
         _generator = generator ?? DefaultProjectGenerator.standard(),
-        _currentDirectory = currentDirectory ?? Directory.current;
+        _currentDirectory = currentDirectory ?? Directory.current,
+        _modelArranger = modelArranger ?? const ModelArranger(),
+        _changeTransaction = changeTransaction ??
+            ChangeTransaction(executor: const LocalProcessExecutor());
 
   static const version = '0.2.0-dev';
 
   final PromptIO _io;
   final ProjectGenerator _generator;
   final Directory _currentDirectory;
+  final ModelArranger _modelArranger;
+  final ChangeTransaction _changeTransaction;
 
   Future<int> run(List<String> arguments) async {
     final parser = _buildParser();
@@ -32,6 +43,15 @@ final class GoldFlutterCli {
         arguments.any((argument) => argument == '--help' || argument == '-h')) {
       _io.writeLine('Usage: gold_flutter create [options]');
       _io.writeLine(parser.commands['create']!.usage);
+      return 0;
+    }
+    if (arguments.length >= 2 &&
+        arguments[0] == 'arrange' &&
+        arguments[1] == 'model' &&
+        arguments.any((argument) => argument == '--help' || argument == '-h')) {
+      final modelParser = parser.commands['arrange']!.commands['model']!;
+      _io.writeLine('Usage: gold_flutter arrange model [options]');
+      _io.writeLine(modelParser.usage);
       return 0;
     }
     late ArgResults results;
@@ -63,9 +83,76 @@ final class GoldFlutterCli {
         return _runCreate(command);
       case 'doctor':
         return _runDoctor();
+      case 'arrange':
+        return _runArrange(command);
       default:
         _io.writeLine('Unknown command: ${command.name}');
         return 64;
+    }
+  }
+
+  Future<int> _runArrange(ArgResults command) async {
+    final nestedCommand = command.command;
+    if (nestedCommand == null || nestedCommand.name != 'model') {
+      _io.writeLine('Usage: gold_flutter arrange model [options]');
+      return 64;
+    }
+    return _runArrangeModel(nestedCommand);
+  }
+
+  Future<int> _runArrangeModel(ArgResults command) async {
+    final path = (command['path'] as String?)?.trim();
+    if (path == null || path.isEmpty) {
+      _io.writeLine('--path is required.');
+      return 64;
+    }
+
+    try {
+      final project = await const ProjectInspector().inspect(_currentDirectory);
+      if (project.isDirty) {
+        _io.writeLine(
+          'Warning: the project has uncommitted Git changes.',
+        );
+      }
+      final plan = await _modelArranger.plan(
+        project: project,
+        path: path,
+        addCopyWith: command['copy-with'] as bool,
+        addTest: command['test'] as bool,
+      );
+      final presenter = ChangePlanPresenter(io: _io)..print(plan);
+      final apply = presenter.confirm(
+        assumeYes: command['yes'] as bool,
+        dryRun: command['dry-run'] as bool,
+      );
+      if (!apply) {
+        return 0;
+      }
+
+      final report = await _changeTransaction.execute(plan);
+      final output = report.output.trimRight();
+      if (output.isNotEmpty) {
+        _io.writeLine(output);
+      }
+      if (!report.success) {
+        _io.writeLine(
+          report.restored
+              ? 'Model arrangement failed. Changes were restored.'
+              : 'Model arrangement failed.',
+        );
+        return 1;
+      }
+      _io.writeLine('Model arrangement applied.');
+      return 0;
+    } on ModelArrangementException catch (error) {
+      _io.writeLine(error.message);
+      return 64;
+    } on ProjectInspectionException catch (error) {
+      _io.writeLine(error.message);
+      return 64;
+    } on Exception catch (error) {
+      _io.writeLine('Model arrangement failed: $error');
+      return 1;
     }
   }
 
@@ -194,6 +281,33 @@ final class GoldFlutterCli {
       ..addFlag('sample-api', negatable: true)
       ..addFlag('yes', abbr: 'y', negatable: false);
     parser.addCommand('doctor');
+    parser.addCommand('arrange').addCommand('model')
+      ..addOption(
+        'path',
+        valueHelp: 'file',
+        help: 'Dart model file under lib/domain/models/.',
+      )
+      ..addFlag(
+        'copy-with',
+        negatable: false,
+        help: 'Add copyWith to eligible classes that do not define it.',
+      )
+      ..addFlag(
+        'test',
+        negatable: false,
+        help: 'Add or update the Gold-owned focused model test.',
+      )
+      ..addFlag(
+        'dry-run',
+        negatable: false,
+        help: 'Preview the complete plan without changing files.',
+      )
+      ..addFlag(
+        'yes',
+        abbr: 'y',
+        negatable: false,
+        help: 'Apply the plan without interactive confirmation.',
+      );
     return parser;
   }
 
@@ -201,7 +315,7 @@ final class GoldFlutterCli {
     _io.writeLine('Gold Flutter $version');
     _io.writeLine('Create a Riverpod + AutoRoute Flutter project.');
     _io.writeLine('');
-    _io.writeLine('Usage: gold_flutter <create|doctor> [options]');
+    _io.writeLine('Usage: gold_flutter <create|doctor|arrange> [options]');
     _io.writeLine(parser.usage);
   }
 }
