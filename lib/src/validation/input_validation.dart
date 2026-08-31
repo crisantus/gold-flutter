@@ -3,6 +3,18 @@ import '../config/project_answers.dart';
 abstract final class InputValidation {
   static final RegExp _projectNamePattern = RegExp(r'^[a-z][a-z0-9_]*$');
   static final RegExp _applicationIdSegment = RegExp(r'^[a-z][a-z0-9_]*$');
+  static final RegExp _controlCharacters = RegExp(r'[\x00-\x1F\x7F]');
+
+  static String displayName(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      throw const FormatException('A display name is required.');
+    }
+    if (_controlCharacters.hasMatch(normalized)) {
+      throw const FormatException('The display name must fit on one line.');
+    }
+    return normalized;
+  }
 
   static String deriveProjectName(String displayName) {
     var derived = displayName

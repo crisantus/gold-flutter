@@ -22,7 +22,7 @@ class App extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
     return MaterialApp.router(
-      title: '{{display_name}}',
+      title: '{{display_name_dart}}',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
@@ -255,6 +255,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../business/starter/starter_viewmodel.dart';
+{{sample_route_import}}
 import '../widgets/app_surface_card.dart';
 
 @RoutePage()
@@ -270,7 +271,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final count = ref.watch(starterViewModelProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('{{display_name}}')),
+      appBar: AppBar(title: const Text('{{display_name_dart}}')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
@@ -311,6 +312,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               icon: const Icon(Icons.auto_awesome),
               label: Text('Try Riverpod · $count'),
             ),
+{{sample_action_widget}}
           ],
         ),
       ),
@@ -351,7 +353,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _handleStarterAction() {
     ref.read(starterViewModelProvider.notifier).increment();
-  }
+  }{{sample_action_handler}}
 }
 ''',
   'test/widget_test.dart': r'''import 'package:flutter/material.dart';

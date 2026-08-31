@@ -61,6 +61,15 @@ bash install.sh
 Review downloaded scripts before running them. The direct Dart activation
 command above remains the simplest transparent installation method.
 
+On Windows PowerShell, the equivalent convenience installer is:
+
+```powershell
+Invoke-WebRequest `
+  -Uri https://raw.githubusercontent.com/crisantus/gold-flutter/main/scripts/install.ps1 `
+  -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
 If your terminal cannot find `gold_flutter`, add Dart's global executable
 directory to your `PATH`.
 

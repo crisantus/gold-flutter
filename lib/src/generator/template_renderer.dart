@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../config/dependency_manifest.dart';
 import '../config/project_answers.dart';
+import '../format/text_escaping.dart';
 import '../templates/api_templates.dart';
 import '../templates/auth_templates.dart';
 import '../templates/base_templates.dart';
@@ -29,6 +30,9 @@ final class TemplateRenderer implements ProjectTemplateRenderer {
   }) async {
     final tokens = {
       '{{display_name}}': answers.displayName,
+      '{{display_name_dart}}': TextEscaping.dartSingleQuoted(
+        answers.displayName,
+      ),
       '{{project_name}}': answers.projectName,
       '{{application_id}}': answers.applicationId,
       '{{uses_api}}': answers.usesApi ? 'yes' : 'no',
@@ -36,6 +40,26 @@ final class TemplateRenderer implements ProjectTemplateRenderer {
       '{{uses_refresh_tokens}}': answers.usesRefreshTokens ? 'yes' : 'no',
       '{{includes_sample_api}}': answers.includesSampleApi ? 'yes' : 'no',
       '{{api_base_url}}': answers.apiBaseUri?.toString() ?? '',
+      '{{sample_route_import}}': answers.includesSampleApi
+          ? "import '../../core/route/app_router.dart';"
+          : '',
+      '{{sample_action_widget}}': answers.includesSampleApi
+          ? '''
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('sample-api-action'),
+              onPressed: _handleOpenSampleApi,
+              icon: const Icon(Icons.cloud_outlined),
+              label: const Text('Open sample API'),
+            ),'''
+          : '',
+      '{{sample_action_handler}}': answers.includesSampleApi
+          ? '''
+
+  void _handleOpenSampleApi() {
+    context.router.push(const SampleItemsRoute());
+  }'''
+          : '',
     };
 
     final templates = <String, String>{

@@ -12,7 +12,10 @@ final class AnswersCollector {
   final PromptIO _io;
 
   ProjectAnswers collect() {
-    final displayName = _required('Project display name: ');
+    final displayName = _validated(
+      'Project display name: ',
+      InputValidation.displayName,
+    );
     final derivedName = InputValidation.deriveProjectName(displayName);
     final projectName = _validatedWithDefault(
       'Dart project name [$derivedName]: ',
@@ -72,15 +75,6 @@ final class AnswersCollector {
       throw const UserCancelledException();
     }
     return answers;
-  }
-
-  String _required(String prompt) {
-    while (true) {
-      _io.write(prompt);
-      final value = _read().trim();
-      if (value.isNotEmpty) return value;
-      _io.writeLine('A value is required.');
-    }
   }
 
   T _validated<T>(String prompt, T Function(String) validator) {

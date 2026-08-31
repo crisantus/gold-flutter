@@ -1,4 +1,5 @@
 import 'project_answers.dart';
+import '../format/text_escaping.dart';
 
 final class DependencyManifest {
   const DependencyManifest();
@@ -22,9 +23,10 @@ final class DependencyManifest {
       dependencies.add('  flutter_secure_storage: ^9.2.4');
     }
 
+    final description = TextEscaping.yamlDoubleQuoted(answers.displayName);
     return '''
 name: ${answers.projectName}
-description: "${answers.displayName} Flutter application."
+description: "$description Flutter application."
 publish_to: none
 version: 0.1.0+1
 

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:gold_flutter/src/generator/template_renderer.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+import 'package:yaml/yaml.dart';
 
 import '../../support/project_answers_fixtures.dart';
 
@@ -58,6 +59,29 @@ void main() {
     expect(readme, contains('My Parking App'));
     expect(readme, contains('com.company.parking'));
     expect(readme, isNot(contains('{{')));
+  });
+
+  test('escapes display names in generated Dart and YAML', () async {
+    final root = await Directory.systemTemp.createTemp('gold_template_test_');
+    addTearDown(() => root.delete(recursive: true));
+    final answers = baseAnswers.copyWith(
+      displayName: r'''Bob's R&D "Clock" $5''',
+    );
+
+    await const TemplateRenderer().render(
+      projectRoot: root,
+      answers: answers,
+    );
+
+    final app = File(p.join(root.path, 'lib/app.dart')).readAsStringSync();
+    expect(app, contains(r'''title: 'Bob\'s R&D "Clock" \$5' '''.trim()));
+    final manifest = loadYaml(
+      File(p.join(root.path, 'pubspec.yaml')).readAsStringSync(),
+    ) as YamlMap;
+    expect(
+      manifest['description'],
+      r'''Bob's R&D "Clock" $5 Flutter application.''',
+    );
   });
 
   test('API variant renders transport layers without authentication', () async {
@@ -140,5 +164,16 @@ void main() {
     ]) {
       expect(File(p.join(root.path, path)).existsSync(), isTrue, reason: path);
     }
+    expect(
+      File(p.join(root.path, 'lib/presentation/screens/home_screen.dart'))
+          .readAsStringSync(),
+      allOf(
+        contains("import '../../core/route/app_router.dart';"),
+        isNot(contains("import '../../core/route/app_router.gr.dart';")),
+        contains('SampleItemsRoute'),
+        contains('context.router.push(const SampleItemsRoute())'),
+        contains('Open sample API'),
+      ),
+    );
   });
 }

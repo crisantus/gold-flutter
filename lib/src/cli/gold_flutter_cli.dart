@@ -120,10 +120,11 @@ final class GoldFlutterCli {
   }
 
   ProjectAnswers _answersFromFlags(ArgResults command) {
-    final displayName = (command['display-name'] as String?)?.trim();
-    if (displayName == null || displayName.isEmpty) {
+    final rawDisplayName = command['display-name'] as String?;
+    if (rawDisplayName == null || rawDisplayName.trim().isEmpty) {
       throw const FormatException('--display-name is required with --yes.');
     }
+    final displayName = InputValidation.displayName(rawDisplayName);
     final rawProjectName = (command['project-name'] as String?)?.trim();
     final projectName = InputValidation.projectName(
       rawProjectName == null || rawProjectName.isEmpty

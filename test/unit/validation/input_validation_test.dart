@@ -3,6 +3,15 @@ import 'package:gold_flutter/src/validation/input_validation.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('display names are trimmed and reject control characters', () {
+    expect(InputValidation.displayName('  Bob\'s R&D  '), 'Bob\'s R&D');
+    expect(() => InputValidation.displayName(''), throwsFormatException);
+    expect(
+      () => InputValidation.displayName('Broken\nName'),
+      throwsFormatException,
+    );
+  });
+
   group('project names', () {
     test('derives valid snake_case from a display name', () {
       expect(

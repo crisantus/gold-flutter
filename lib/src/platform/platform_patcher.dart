@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../format/text_escaping.dart';
 import 'app_identity.dart';
 
 abstract interface class ProjectPlatformPatcher {
@@ -20,16 +21,13 @@ final class PlatformPatcher implements ProjectPlatformPatcher {
     required Directory projectRoot,
     required AppIdentity identity,
   }) async {
+    await _patchAppleApplicationIds(projectRoot, identity);
     await _replaceInFiles(projectRoot, [
       'android/app/build.gradle',
       'android/app/build.gradle.kts',
-      'ios/Runner.xcodeproj/project.pbxproj',
-      'macos/Runner.xcodeproj/project.pbxproj',
-      'macos/Runner/Configs/AppInfo.xcconfig',
       'linux/CMakeLists.txt',
     ], {
       identity.generatedAndroidApplicationId: identity.applicationId,
-      identity.generatedAppleApplicationId: identity.applicationId,
     });
 
     await _patchAndroidMainActivity(projectRoot, identity);
@@ -42,7 +40,7 @@ final class PlatformPatcher implements ProjectPlatformPatcher {
         ),
       ),
       RegExp(r'android:label="[^"]*"'),
-      'android:label="${identity.displayName}"',
+      'android:label="${TextEscaping.xmlAttribute(identity.displayName)}"',
     );
 
     await _setPlistDisplayName(
@@ -90,8 +88,8 @@ final class PlatformPatcher implements ProjectPlatformPatcher {
     final displayPattern = RegExp(
       r'<key>CFBundleDisplayName</key>\s*<string>[^<]*</string>',
     );
-    final entry =
-        '<key>CFBundleDisplayName</key>\n\t<string>$displayName</string>';
+    final escaped = TextEscaping.xmlText(displayName);
+    final entry = '<key>CFBundleDisplayName</key>\n\t<string>$escaped</string>';
     if (displayPattern.hasMatch(content)) {
       content = content.replaceFirst(displayPattern, entry);
     } else {
@@ -118,14 +116,14 @@ final class PlatformPatcher implements ProjectPlatformPatcher {
       var content = await index.readAsString();
       content = content.replaceFirst(
         RegExp(r'<title>[^<]*</title>'),
-        '<title>${identity.displayName}</title>',
+        '<title>${TextEscaping.xmlText(identity.displayName)}</title>',
       );
       content = content.replaceFirst(
         RegExp(
           r'<meta name="apple-mobile-web-app-title" content="[^"]*">',
         ),
         '<meta name="apple-mobile-web-app-title" '
-        'content="${identity.displayName}">',
+        'content="${TextEscaping.htmlAttribute(identity.displayName)}">',
       );
       await index.writeAsString(content);
     }
@@ -140,9 +138,47 @@ final class PlatformPatcher implements ProjectPlatformPatcher {
       'windows/runner/main.cpp',
       'windows/runner/Runner.rc',
     ], {
-      '"${identity.projectName}"': '"${identity.displayName}"',
-      'L"${identity.projectName}"': 'L"${identity.displayName}"',
+      '"${identity.projectName}"':
+          '"${TextEscaping.cppString(identity.displayName)}"',
+      'L"${identity.projectName}"':
+          'L"${TextEscaping.cppString(identity.displayName)}"',
     });
+  }
+
+  Future<void> _patchAppleApplicationIds(
+    Directory root,
+    AppIdentity identity,
+  ) async {
+    for (final relativePath in const [
+      'ios/Runner.xcodeproj/project.pbxproj',
+      'macos/Runner.xcodeproj/project.pbxproj',
+      'macos/Runner/Configs/AppInfo.xcconfig',
+    ]) {
+      final file = File(p.join(root.path, relativePath));
+      if (!await file.exists()) continue;
+      final content = await file.readAsString();
+      final patched = content.replaceAllMapped(
+        RegExp(
+          r'(^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*)([^;\r\n]+)(;?)',
+          multiLine: true,
+        ),
+        (match) {
+          final current = match.group(2)!.trim();
+          if (current.startsWith(r'$')) return match.group(0)!;
+          final suffix = _appleTestSuffix(current);
+          return '${match.group(1)}${identity.applicationId}$suffix'
+              '${match.group(3)}';
+        },
+      );
+      await file.writeAsString(patched);
+    }
+  }
+
+  String _appleTestSuffix(String current) {
+    for (final suffix in const ['.RunnerTests', '.RunnerUITests']) {
+      if (current.endsWith(suffix)) return suffix;
+    }
+    return '';
   }
 
   Future<void> _patchAndroidMainActivity(

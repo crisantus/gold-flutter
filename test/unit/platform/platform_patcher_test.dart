@@ -96,6 +96,114 @@ void main() {
       allOf(contains('BINARY_NAME "my_app"'), contains('com.company.product')),
     );
   });
+
+  test('replaces Flutter Apple identifiers without guessing camel case',
+      () async {
+    final root = await Directory.systemTemp.createTemp('gold_identity_test_');
+    addTearDown(() => root.delete(recursive: true));
+    await _write(
+      root,
+      'ios/Runner.xcodeproj/project.pbxproj',
+      'PRODUCT_BUNDLE_IDENTIFIER = com.review.gfReviewComplete20260831a;\n'
+          'PRODUCT_BUNDLE_IDENTIFIER = '
+          'com.review.gfReviewComplete20260831a.RunnerTests;',
+    );
+    await _write(
+      root,
+      'macos/Runner/Configs/AppInfo.xcconfig',
+      'PRODUCT_BUNDLE_IDENTIFIER = com.review.gfReviewComplete20260831a',
+    );
+
+    await const PlatformPatcher().apply(
+      projectRoot: root,
+      identity: const AppIdentity(
+        displayName: 'Review Complete',
+        projectName: 'gf_review_complete_20260831_a',
+        applicationId: 'com.review.exactid',
+      ),
+    );
+
+    expect(
+      File(p.join(root.path, 'ios/Runner.xcodeproj/project.pbxproj'))
+          .readAsStringSync(),
+      allOf(
+        contains('PRODUCT_BUNDLE_IDENTIFIER = com.review.exactid;'),
+        contains(
+          'PRODUCT_BUNDLE_IDENTIFIER = com.review.exactid.RunnerTests;',
+        ),
+        isNot(contains('gfReviewComplete20260831a')),
+      ),
+    );
+    expect(
+      File(p.join(root.path, 'macos/Runner/Configs/AppInfo.xcconfig'))
+          .readAsStringSync(),
+      contains('PRODUCT_BUNDLE_IDENTIFIER = com.review.exactid'),
+    );
+  });
+
+  test('escapes display names for platform file formats', () async {
+    final root = await Directory.systemTemp.createTemp('gold_identity_test_');
+    addTearDown(() => root.delete(recursive: true));
+    await _write(
+      root,
+      'android/app/src/main/AndroidManifest.xml',
+      '<application android:label="my_app" />',
+    );
+    await _write(
+      root,
+      'ios/Runner/Info.plist',
+      '<dict><key>CFBundleDisplayName</key><string>my_app</string></dict>',
+    );
+    await _write(
+      root,
+      'web/manifest.json',
+      '{"name":"my_app","short_name":"my_app"}',
+    );
+    await _write(
+      root,
+      'web/index.html',
+      '<title>my_app</title>\n'
+          '<meta name="apple-mobile-web-app-title" content="my_app">',
+    );
+    await _write(
+      root,
+      'linux/runner/my_application.cc',
+      'gtk_window_set_title(window, "my_app");',
+    );
+
+    await const PlatformPatcher().apply(
+      projectRoot: root,
+      identity: const AppIdentity(
+        displayName: 'Bob\'s R&D <Clock> "Plus"',
+        projectName: 'my_app',
+        applicationId: 'com.company.product',
+      ),
+    );
+
+    expect(
+      File(p.join(root.path, 'android/app/src/main/AndroidManifest.xml'))
+          .readAsStringSync(),
+      contains('Bob\'s R&amp;D &lt;Clock&gt; &quot;Plus&quot;'),
+    );
+    expect(
+      File(p.join(root.path, 'ios/Runner/Info.plist')).readAsStringSync(),
+      contains('Bob\'s R&amp;D &lt;Clock&gt; "Plus"'),
+    );
+    expect(
+      File(p.join(root.path, 'web/index.html')).readAsStringSync(),
+      allOf(
+        contains('<title>Bob\'s R&amp;D &lt;Clock&gt; "Plus"</title>'),
+        contains(
+          'content="Bob&#39;s R&amp;D &lt;Clock&gt; &quot;Plus&quot;"',
+        ),
+      ),
+    );
+    expect(
+      File(p.join(root.path, 'linux/runner/my_application.cc'))
+          .readAsStringSync(),
+      contains('"Bob\'s R&D <Clock> \\"Plus\\""'),
+    );
+  });
 }
 
 Future<void> _write(Directory root, String relativePath, String content) async {
