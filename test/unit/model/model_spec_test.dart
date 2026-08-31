@@ -124,10 +124,46 @@ void main() {
     );
     expect(
       () => ModelFieldSpec(
+        name: 'user',
+        typeSource: 'UserModel',
+        jsonKey: 'user',
+        kind: ModelFieldKind.nestedModel,
+        isNullable: false,
+        nestedType: null,
+        sourceOffset: 0,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => ModelFieldSpec(
         name: 'users',
         typeSource: 'List<UserModel>',
         jsonKey: 'users',
         kind: ModelFieldKind.list,
+        isNullable: false,
+        nestedType: null,
+        sourceOffset: 0,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => ModelFieldSpec(
+        name: 'users',
+        typeSource: 'List<UserModel>',
+        jsonKey: 'users',
+        kind: ModelFieldKind.list,
+        isNullable: false,
+        nestedType: '',
+        sourceOffset: 0,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => ModelFieldSpec(
+        name: 'status',
+        typeSource: 'Status',
+        jsonKey: 'status',
+        kind: ModelFieldKind.enumeration,
         isNullable: false,
         nestedType: null,
         sourceOffset: 0,
@@ -141,7 +177,7 @@ void main() {
         jsonKey: 'status',
         kind: ModelFieldKind.enumeration,
         isNullable: false,
-        nestedType: null,
+        nestedType: '',
         sourceOffset: 0,
       ),
       throwsArgumentError,
