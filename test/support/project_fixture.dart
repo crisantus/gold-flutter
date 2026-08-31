@@ -1,0 +1,35 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
+final class ProjectFixture {
+  ProjectFixture._(this.root);
+
+  final Directory root;
+
+  static Future<ProjectFixture> create({
+    Map<String, String> files = const {},
+  }) async {
+    final root = await Directory.systemTemp.createTemp('gold_project_');
+    final fixture = ProjectFixture._(root);
+    await fixture.write(
+      'pubspec.yaml',
+      'name: fixture\nenvironment:\n  sdk: ">=3.5.0 <4.0.0"\n'
+          'dependencies:\n  flutter:\n    sdk: flutter\n',
+    );
+    for (final entry in files.entries) {
+      await fixture.write(entry.key, entry.value);
+    }
+    return fixture;
+  }
+
+  File file(String relativePath) => File(p.join(root.path, relativePath));
+
+  Future<void> write(String relativePath, String content) async {
+    final target = file(relativePath);
+    await target.parent.create(recursive: true);
+    await target.writeAsString(content);
+  }
+
+  Future<void> dispose() => root.delete(recursive: true);
+}

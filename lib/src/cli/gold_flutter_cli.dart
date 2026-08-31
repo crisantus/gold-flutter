@@ -19,7 +19,7 @@ final class GoldFlutterCli {
         _generator = generator ?? DefaultProjectGenerator.standard(),
         _currentDirectory = currentDirectory ?? Directory.current;
 
-  static const version = '0.1.0';
+  static const version = '0.2.0-dev';
 
   final PromptIO _io;
   final ProjectGenerator _generator;

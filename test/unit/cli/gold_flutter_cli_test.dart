@@ -14,7 +14,7 @@ void main() {
     final exitCode = await GoldFlutterCli(io: io).run(['--version']);
 
     expect(exitCode, 0);
-    expect(io.output.single, contains('0.1.0'));
+    expect(io.output.single, contains('0.2.0-dev'));
   });
 
   test('create flags build complete answers without prompting', () async {
