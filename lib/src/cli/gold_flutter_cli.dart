@@ -134,6 +134,7 @@ final class GoldFlutterCli {
       if (output.isNotEmpty) {
         _io.writeLine(output);
       }
+      presenter.printReport(report);
       if (!report.success) {
         _io.writeLine(
           report.restored

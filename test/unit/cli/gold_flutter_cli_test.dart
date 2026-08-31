@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:gold_flutter/src/change/project_file_system.dart';
 import 'package:gold_flutter/src/change/change_transaction.dart';
 import 'package:gold_flutter/src/cli/gold_flutter_cli.dart';
 import 'package:gold_flutter/src/config/project_answers.dart';
@@ -141,6 +142,130 @@ void main() {
     );
   });
 
+  test('arrange model --copy-with dry-run reports preserved copyWith and null',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/report_model.dart': _existingCopyWithModel},
+    );
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor(const {});
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(
+      io: io,
+      currentDirectory: fixture.root,
+      changeTransaction: ChangeTransaction(executor: executor),
+    ).run([
+      'arrange',
+      'model',
+      '--path',
+      'lib/domain/models/report_model.dart',
+      '--copy-with',
+      '--dry-run',
+    ]);
+
+    expect(exitCode, 0);
+    expect(executor.calls, isEmpty);
+    expect(io.output, contains('Notice'));
+    expect(
+      io.output.join('\n'),
+      contains('passing null preserves the current value and cannot clear it'),
+    );
+    expect(io.output, contains('Preserved'));
+    expect(io.output.join('\n'), contains('ReportModel.copyWith'));
+    expect(
+      io.output.indexOf('Notice'),
+      lessThan(io.output.indexOf('No files have been changed.')),
+    );
+  });
+
+  test('arrange model apply reports a preserved non-owned test', () async {
+    const existingTest = '// Maintained by the application team.\n';
+    final fixture = await ProjectFixture.create(
+      files: {
+        'lib/domain/models/report_model.dart': _supportedModel,
+        'test/domain/models/report_model_test.dart': existingTest,
+      },
+    );
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/domain/models/report_model.dart': 'formatted',
+      'flutter analyze': 'No issues found',
+    });
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(
+      io: io,
+      currentDirectory: fixture.root,
+      changeTransaction: ChangeTransaction(executor: executor),
+    ).run([
+      'arrange',
+      'model',
+      '--path',
+      'lib/domain/models/report_model.dart',
+      '--copy-with',
+      '--test',
+      '--yes',
+    ]);
+
+    expect(exitCode, 0);
+    expect(io.output, contains('Notice'));
+    expect(io.output, contains('Preserved'));
+    expect(
+      io.output.join('\n'),
+      contains('test/domain/models/report_model_test.dart'),
+    );
+    expect(
+      fixture
+          .file('test/domain/models/report_model_test.dart')
+          .readAsStringSync(),
+      existingTest,
+    );
+    expect(
+      io.output.indexOf('Notice'),
+      lessThan(io.output.indexWhere((line) => line.contains('formatted'))),
+    );
+  });
+
+  test('arrange model apply reports every transaction skip', () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/report_model.dart': _supportedModel},
+    );
+    addTearDown(fixture.dispose);
+    final testPath =
+        fixture.file('test/domain/models/report_model_test.dart').path;
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/domain/models/report_model.dart '
+          'test/domain/models/report_model_test.dart': 'formatted',
+      'flutter analyze': 'No issues found',
+      'flutter test test/domain/models/report_model_test.dart': 'passed',
+    });
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(
+      io: io,
+      currentDirectory: fixture.root,
+      changeTransaction: ChangeTransaction(
+        executor: executor,
+        fileSystem: _AppearingFileSystem(testPath),
+      ),
+    ).run([
+      'arrange',
+      'model',
+      '--path',
+      'lib/domain/models/report_model.dart',
+      '--test',
+      '--yes',
+    ]);
+
+    expect(exitCode, 0);
+    expect(io.output, contains('Skipped'));
+    expect(
+      io.output.join('\n'),
+      contains('test/domain/models/report_model_test.dart'),
+    );
+  });
+
   test('arrange model returns 64 for an unsupported model', () async {
     final fixture = await ProjectFixture.create(
       files: {'lib/domain/models/report_model.dart': _unsupportedModel},
@@ -228,6 +353,46 @@ final class _FakeProjectGenerator implements ProjectGenerator {
   }
 }
 
+final class _AppearingFileSystem implements ProjectFileSystem {
+  _AppearingFileSystem(this.appearingPath);
+
+  final String appearingPath;
+  final ProjectFileSystem _delegate = const LocalProjectFileSystem();
+  var _appearingPathChecks = 0;
+
+  @override
+  Future<String> createTemporaryDirectory(String prefix) =>
+      _delegate.createTemporaryDirectory(prefix);
+
+  @override
+  Future<bool> exists(String path) {
+    if (path == appearingPath && ++_appearingPathChecks >= 3) {
+      return Future.value(true);
+    }
+    return _delegate.exists(path);
+  }
+
+  @override
+  Future<bool> isLink(String path) => _delegate.isLink(path);
+
+  @override
+  Future<bool> containsLink(String path) => _delegate.containsLink(path);
+
+  @override
+  Future<List<int>> readBytes(String path) => _delegate.readBytes(path);
+
+  @override
+  Future<void> writeBytes(String path, List<int> bytes) =>
+      _delegate.writeBytes(path, bytes);
+
+  @override
+  Future<void> delete(String path) => _delegate.delete(path);
+
+  @override
+  Future<void> copyTree(String source, String destination) =>
+      _delegate.copyTree(source, destination);
+}
+
 const _supportedModel = r'''class ReportModel {
   final String id;
 
@@ -247,5 +412,20 @@ const _unsupportedModel = r'''class ReportModel {
   factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
         grouped: json?["grouped"] as Map<String, List<Object?>>,
       );
+}
+''';
+
+const _existingCopyWithModel = r'''class ReportModel {
+  final String? value;
+
+  ReportModel({required this.value});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        value: (json?["value"] ?? "").toString(),
+      );
+
+  ReportModel copyWith({String? value}) {
+    return ReportModel(value: value ?? this.value);
+  }
 }
 ''';

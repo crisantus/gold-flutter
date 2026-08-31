@@ -41,8 +41,9 @@ final class ModelArranger {
     if (!parsed.isSafe) {
       throw ModelArrangementException(parsed.diagnostics.join('\n'));
     }
+    final spec = parsed.spec!;
     if (addTest) {
-      final inaccessible = testRenderer.inaccessibleSymbols(parsed.spec!);
+      final inaccessible = testRenderer.inaccessibleSymbols(spec);
       if (inaccessible.isNotEmpty) {
         throw ModelArrangementException(
           'Cannot generate a focused test for library-private symbol: '
@@ -55,7 +56,7 @@ final class ModelArranger {
       PlannedFileChange(
         relativePath: modelPath.relativePath,
         content: renderer.render(
-          parsed.spec!,
+          spec,
           addCopyWith: addCopyWith,
         ),
         kind: FileChangeKind.modify,
@@ -99,7 +100,7 @@ final class ModelArranger {
           PlannedFileChange(
             relativePath: focusedTestPath,
             content: testRenderer.render(
-              parsed.spec!,
+              spec,
               modelImport: modelImport,
             ),
             kind: kind,
@@ -144,6 +145,27 @@ final class ModelArranger {
       projectRoot: project.root,
       files: files,
       commands: commands,
+      notices: [
+        if (addCopyWith)
+          const PlannedNotice(
+            'Generated nullable copyWith parameters use '
+            'value ?? this.value; passing null preserves the current value '
+            'and cannot clear it in 0.2.0.',
+          ),
+      ],
+      preserved: [
+        for (final model in spec.classes)
+          if (model.hasCopyWith)
+            PlannedPreservation(
+              subject: '${model.name}.copyWith',
+              reason: 'Keep the existing supported copyWith method',
+            ),
+        if (preservedTest)
+          PlannedPreservation(
+            subject: focusedTestPath!,
+            reason: 'Keep the existing non-Gold test unchanged',
+          ),
+      ],
     );
   }
 }

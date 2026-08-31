@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:gold_flutter/src/change/change_transaction.dart';
 import 'package:gold_flutter/src/cli/gold_flutter_cli.dart';
@@ -15,12 +16,12 @@ void main() {
       () async {
     final fixture = await ProjectFixture.create();
     addTearDown(fixture.dispose);
-    final repositoryRoot = Directory.current.path;
+    final repositoryRoot = await _resolvePackageRoot();
     final source = File(
-      p.join(repositoryRoot, 'test/fixtures/models/eyeask_input.dart'),
+      p.join(repositoryRoot.path, 'test/fixtures/models/eyeask_input.dart'),
     );
     final golden = File(
-      p.join(repositoryRoot, 'test/fixtures/models/eyeask_expected.dart'),
+      p.join(repositoryRoot.path, 'test/fixtures/models/eyeask_expected.dart'),
     );
     final model = fixture.file('lib/domain/models/report_model.dart');
     await model.parent.create(recursive: true);
@@ -61,4 +62,14 @@ void main() {
       'flutter test test/domain/models/report_model_test.dart',
     ]);
   });
+}
+
+Future<Directory> _resolvePackageRoot() async {
+  final libraryUri = await Isolate.resolvePackageUri(
+    Uri.parse('package:gold_flutter/gold_flutter.dart'),
+  );
+  if (libraryUri == null || libraryUri.scheme != 'file') {
+    throw StateError('Unable to resolve the gold_flutter package root.');
+  }
+  return File.fromUri(libraryUri).parent.parent;
 }

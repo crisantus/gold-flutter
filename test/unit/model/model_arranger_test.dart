@@ -252,6 +252,31 @@ void main() {
     expect(plan.commands[1].mutatesFiles, isFalse);
   });
 
+  test('plans copyWith limitation notice and existing method preservation',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/report_model.dart': _existingCopyWithModel},
+    );
+    addTearDown(fixture.dispose);
+
+    final plan = await arranger.plan(
+      project: _inspection(fixture),
+      path: 'lib/domain/models/report_model.dart',
+      addCopyWith: true,
+      addTest: false,
+    );
+
+    expect(plan.notices, hasLength(1));
+    expect(plan.notices.single.message, contains('value ?? this.value'));
+    expect(plan.notices.single.message, contains('cannot clear it'));
+    expect(plan.preserved, hasLength(1));
+    expect(plan.preserved.single.subject, 'ReportModel.copyWith');
+    expect(
+      plan.preserved.single.reason,
+      'Keep the existing supported copyWith method',
+    );
+  });
+
   test('creates and formats a missing owned focused test', () async {
     final fixture = await ProjectFixture.create(
       files: {'lib/domain/models/report_model.dart': _supportedModel},
@@ -309,6 +334,7 @@ void main() {
     );
 
     expect(ownedPlan.files[1].kind, FileChangeKind.modify);
+    expect(ownedPlan.preserved, isEmpty);
     expect(
       ownedPlan.files[1].precondition?.expectedContent,
       '${ModelTestRenderer.ownershipMarker}\nold generated test\n',
@@ -329,6 +355,15 @@ void main() {
     expect(preservedPlan.summary, contains('Preserve non-Gold test'));
     expect(preservedPlan.summary,
         contains('test/domain/models/report_model_test.dart'));
+    expect(preservedPlan.preserved, hasLength(1));
+    expect(
+      preservedPlan.preserved.single.subject,
+      'test/domain/models/report_model_test.dart',
+    );
+    expect(
+      preservedPlan.preserved.single.reason,
+      'Keep the existing non-Gold test unchanged',
+    );
     expect(preservedPlan.commands[0].arguments,
         ['format', 'lib/domain/models/report_model.dart']);
     expect(
@@ -601,6 +636,21 @@ const _unsupportedModel = r'''class ReportModel {
   factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
         grouped: json?["grouped"] as Map<String, List<Object?>>,
       );
+}
+''';
+
+const _existingCopyWithModel = r'''class ReportModel {
+  final String? value;
+
+  ReportModel({required this.value});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        value: (json?["value"] ?? "").toString(),
+      );
+
+  ReportModel copyWith({String? value}) {
+    return ReportModel(value: value ?? this.value);
+  }
 }
 ''';
 

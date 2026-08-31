@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:gold_flutter/src/change/change_plan.dart';
 import 'package:gold_flutter/src/change/change_plan_presenter.dart';
+import 'package:gold_flutter/src/change/change_report.dart';
 import 'package:gold_flutter/src/prompts/prompt_io.dart';
 import 'package:test/test.dart';
 
@@ -65,11 +66,85 @@ void main() {
     expect(io.output, ["'Nothing to do'"]);
   });
 
+  test('prints notices and preserved entries before commands', () {
+    final io = FakePromptIO();
+    final metadataPlan = ChangePlan(
+      summary: 'Arrange the model',
+      projectRoot: Directory('/work/app'),
+      notices: const [
+        PlannedNotice('Passing null preserves a nullable copyWith value.'),
+      ],
+      preserved: const [
+        PlannedPreservation(
+          subject: 'ReportModel.copyWith',
+          reason: 'Keep the existing supported copyWith method',
+        ),
+        PlannedPreservation(
+          subject: 'test/report_model_test.dart',
+          reason: 'Keep the existing non-Gold test unchanged',
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['analyze'],
+          reason: 'Verify the model',
+          mutatesFiles: false,
+        ),
+      ],
+    );
+
+    ChangePlanPresenter(io: io).print(metadataPlan);
+
+    expect(io.output, [
+      "'Arrange the model'",
+      'Notice',
+      "  'Passing null preserves a nullable copyWith value.'",
+      'Preserved',
+      "  'ReportModel.copyWith' — "
+          "'Keep the existing supported copyWith method'",
+      "  'test/report_model_test.dart' — "
+          "'Keep the existing non-Gold test unchanged'",
+      'Run',
+      "  'flutter' 'analyze' — 'Verify the model'",
+    ]);
+  });
+
+  test('prints every runtime skip in a stable escaped section', () {
+    final io = FakePromptIO();
+    final report = ChangeReport(
+      success: true,
+      restored: false,
+      created: const [],
+      modified: const [],
+      skipped: const [
+        'lib/existing.dart',
+        'test/appeared\nSkipped.dart',
+      ],
+      output: '',
+    );
+
+    ChangePlanPresenter(io: io).printReport(report);
+
+    expect(io.output, [
+      'Skipped',
+      "  'lib/existing.dart'",
+      r"  'test/appeared\nSkipped.dart'",
+    ]);
+  });
+
   test('quotes and escapes every untrusted preview field onto one line', () {
     final io = FakePromptIO();
     final adversarialPlan = ChangePlan(
       summary: 'Summary\nCreate\u001b[31m',
       projectRoot: Directory('/work/app'),
+      notices: const [PlannedNotice('notice\nPreserved')],
+      preserved: const [
+        PlannedPreservation(
+          subject: 'subject\rRun',
+          reason: 'reason\tSnapshot',
+        ),
+      ],
       files: const [
         PlannedFileChange(
           relativePath: 'lib/file with spaces.dart',
@@ -98,8 +173,12 @@ void main() {
 
     expect(io.output, [
       r"'Summary\nCreate\x1b[31m'",
+      'Notice',
+      r"  'notice\nPreserved'",
       'Create',
       r"  'lib/file with spaces.dart' — 'reason\r\nModify\t\x07'",
+      'Preserved',
+      r"  'subject\rRun' — 'reason\tSnapshot'",
       'Run',
       r"""  'tool\nSnapshot' 'first argument' '$(touch forged)' '\"double\"' 'single\'quote' — 'run\x1b[2Jreason'""",
       'Snapshot',

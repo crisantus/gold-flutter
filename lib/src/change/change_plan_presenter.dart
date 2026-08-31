@@ -1,5 +1,6 @@
 import '../prompts/prompt_io.dart';
 import 'change_plan.dart';
+import 'change_report.dart';
 
 /// Writes a deterministic preview of a [ChangePlan] and confirms its use.
 final class ChangePlanPresenter {
@@ -9,8 +10,22 @@ final class ChangePlanPresenter {
 
   void print(ChangePlan plan) {
     _io.writeLine(_quoted(plan.summary));
+    if (plan.notices.isNotEmpty) {
+      _io.writeLine('Notice');
+      for (final notice in plan.notices) {
+        _io.writeLine('  ${_quoted(notice.message)}');
+      }
+    }
     _writeFiles(plan, FileChangeKind.create, 'Create');
     _writeFiles(plan, FileChangeKind.modify, 'Modify');
+    if (plan.preserved.isNotEmpty) {
+      _io.writeLine('Preserved');
+      for (final entry in plan.preserved) {
+        _io.writeLine(
+          '  ${_quoted(entry.subject)} — ${_quoted(entry.reason)}',
+        );
+      }
+    }
     if (plan.commands.isNotEmpty) {
       _io.writeLine('Run');
       for (final command in plan.commands) {
@@ -26,6 +41,16 @@ final class ChangePlanPresenter {
       for (final root in plan.snapshotRoots) {
         _io.writeLine('  ${_quoted(root)}');
       }
+    }
+  }
+
+  void printReport(ChangeReport report) {
+    if (report.skipped.isEmpty) {
+      return;
+    }
+    _io.writeLine('Skipped');
+    for (final path in report.skipped) {
+      _io.writeLine('  ${_quoted(path)}');
     }
   }
 

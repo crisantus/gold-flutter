@@ -52,6 +52,22 @@ final class PlannedCommand {
   List<String> get arguments => _arguments;
 }
 
+final class PlannedNotice {
+  const PlannedNotice(this.message);
+
+  final String message;
+}
+
+final class PlannedPreservation {
+  const PlannedPreservation({
+    required this.subject,
+    required this.reason,
+  });
+
+  final String subject;
+  final String reason;
+}
+
 final class ChangePlan {
   ChangePlan({
     required this.summary,
@@ -59,19 +75,25 @@ final class ChangePlan {
     Iterable<PlannedFileChange> files = const [],
     Iterable<PlannedCommand> commands = const [],
     Iterable<String> snapshotRoots = const [],
+    Iterable<PlannedNotice> notices = const [],
+    Iterable<PlannedPreservation> preserved = const [],
   })  : files = List.unmodifiable(
           _normalizeAndValidateFiles(files),
         ),
         commands = List.unmodifiable(commands),
         snapshotRoots = List.unmodifiable(
           _normalizeAndValidateRoots(snapshotRoots),
-        );
+        ),
+        notices = List.unmodifiable(notices),
+        preserved = List.unmodifiable(preserved);
 
   final String summary;
   final Directory projectRoot;
   final List<PlannedFileChange> files;
   final List<PlannedCommand> commands;
   final List<String> snapshotRoots;
+  final List<PlannedNotice> notices;
+  final List<PlannedPreservation> preserved;
 
   static List<PlannedFileChange> _normalizeAndValidateFiles(
     Iterable<PlannedFileChange> changes,

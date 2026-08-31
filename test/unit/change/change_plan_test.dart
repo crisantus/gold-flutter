@@ -183,11 +183,22 @@ void main() {
         ),
       ],
       snapshotRoots: const ['lib'],
+      notices: const [PlannedNotice('Read before applying')],
+      preserved: const [
+        PlannedPreservation(
+          subject: 'Existing.member',
+          reason: 'Keep the supported member',
+        ),
+      ],
     );
 
     expect(() => plan.files.clear(), throwsUnsupportedError);
     expect(() => plan.commands.clear(), throwsUnsupportedError);
     expect(() => plan.snapshotRoots.clear(), throwsUnsupportedError);
+    expect(() => plan.notices.clear(), throwsUnsupportedError);
+    expect(() => plan.preserved.clear(), throwsUnsupportedError);
+    expect(plan.notices.single.message, 'Read before applying');
+    expect(plan.preserved.single.subject, 'Existing.member');
     expect(
         () => plan.commands.single.arguments.clear(), throwsUnsupportedError);
   });
