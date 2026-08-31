@@ -29,7 +29,7 @@ final class ProjectInspector {
 
     return ProjectInspection(
       root: root,
-      projectName: pubspec['name'] as String? ?? root.uri.pathSegments.last,
+      projectName: pubspec['name'] as String? ?? p.basename(root.path),
       dependencies: _dependencyNames(pubspec),
       assets: _assetPaths(pubspec),
       hasTests: await Directory(p.join(root.path, 'test')).exists(),
