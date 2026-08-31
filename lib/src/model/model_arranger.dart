@@ -41,6 +41,15 @@ final class ModelArranger {
     if (!parsed.isSafe) {
       throw ModelArrangementException(parsed.diagnostics.join('\n'));
     }
+    if (addTest) {
+      final inaccessible = testRenderer.inaccessibleSymbols(parsed.spec!);
+      if (inaccessible.isNotEmpty) {
+        throw ModelArrangementException(
+          'Cannot generate a focused test for library-private symbol: '
+          '${inaccessible.join(', ')}',
+        );
+      }
+    }
 
     final files = <PlannedFileChange>[
       PlannedFileChange(
@@ -51,9 +60,11 @@ final class ModelArranger {
         ),
         kind: FileChangeKind.modify,
         reason: 'Arrange models using the EyeAsk standard',
+        precondition: TextFilePrecondition.exact(source),
       ),
     ];
     String? focusedTestPath;
+    String? existingTestContent;
     var preservedTest = false;
     if (addTest) {
       focusedTestPath = testRenderer.testPathFor(modelPath.relativePath);
@@ -73,8 +84,9 @@ final class ModelArranger {
           ),
       };
       if (kind == FileChangeKind.modify) {
-        final existing = await _readFile(testTarget, focusedTestPath);
-        if (_firstLine(existing) != ModelTestRenderer.ownershipMarker) {
+        existingTestContent = await _readFile(testTarget, focusedTestPath);
+        if (_firstLine(existingTestContent) !=
+            ModelTestRenderer.ownershipMarker) {
           preservedTest = true;
         }
       }
@@ -92,6 +104,11 @@ final class ModelArranger {
             ),
             kind: kind,
             reason: 'Add defensive tests for the arranged model',
+            precondition: switch (kind) {
+              FileChangeKind.create => const TextFilePrecondition.absent(),
+              FileChangeKind.modify =>
+                TextFilePrecondition.exact(existingTestContent!),
+            },
           ),
         );
       }

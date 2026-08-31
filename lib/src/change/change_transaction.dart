@@ -31,6 +31,7 @@ final class ChangeTransaction {
     try {
       final commandEffects = await _validateCommands(plan);
       await _validateDeclaredPaths(plan);
+      await _validatePreconditions(plan);
       await _recordMissingParentDirectories(
         plan,
         createdParentDirectories,
@@ -292,6 +293,41 @@ final class ChangeTransaction {
     }
     for (final root in plan.snapshotRoots) {
       await _rejectLinks(plan, root, recursive: true);
+    }
+  }
+
+  Future<void> _validatePreconditions(ChangePlan plan) async {
+    for (final change in plan.files) {
+      final precondition = change.precondition;
+      if (precondition == null) {
+        continue;
+      }
+      final path = await _rejectLinks(plan, change.relativePath);
+      final exists = await fileSystem.exists(path);
+      switch (precondition.kind) {
+        case TextFilePreconditionKind.absent:
+          if (exists) {
+            throw StateError(
+              'File precondition failed for ${change.relativePath}: '
+              'expected file to be absent.',
+            );
+          }
+        case TextFilePreconditionKind.exactContent:
+          if (!exists) {
+            throw StateError(
+              'File precondition failed for ${change.relativePath}: '
+              'expected original content but file is missing.',
+            );
+          }
+          final bytes = await fileSystem.readBytes(path);
+          final expected = utf8.encode(precondition.expectedContent!);
+          if (!_bytesEqual(bytes, expected)) {
+            throw StateError(
+              'File precondition failed for ${change.relativePath}: '
+              'original content changed after planning.',
+            );
+          }
+      }
     }
   }
 
@@ -577,6 +613,18 @@ final class ChangeTransaction {
     }
     return true;
   }
+}
+
+bool _bytesEqual(List<int> left, List<int> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 enum _CommandEffect { readOnly, mutating }

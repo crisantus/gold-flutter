@@ -100,6 +100,68 @@ void main() {
     expect(command.arguments, ['test']);
   });
 
+  test('preserves immutable coherent text-file preconditions', () {
+    final plan = ChangePlan(
+      summary: 'guard previewed files',
+      projectRoot: Directory('/work/app'),
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'update existing',
+          precondition: TextFilePrecondition.exact('before'),
+        ),
+        PlannedFileChange(
+          relativePath: 'lib/new.dart',
+          content: 'new',
+          kind: FileChangeKind.create,
+          reason: 'create new',
+          precondition: TextFilePrecondition.absent(),
+        ),
+      ],
+    );
+
+    expect(
+      plan.files[0].precondition?.kind,
+      TextFilePreconditionKind.exactContent,
+    );
+    expect(plan.files[0].precondition?.expectedContent, 'before');
+    expect(
+      plan.files[1].precondition?.kind,
+      TextFilePreconditionKind.absent,
+    );
+    expect(plan.files[1].precondition?.expectedContent, isNull);
+  });
+
+  test('rejects text-file preconditions incoherent with the change kind', () {
+    for (final change in const [
+      PlannedFileChange(
+        relativePath: 'lib/create.dart',
+        content: 'new',
+        kind: FileChangeKind.create,
+        reason: 'invalid exact create',
+        precondition: TextFilePrecondition.exact('before'),
+      ),
+      PlannedFileChange(
+        relativePath: 'lib/modify.dart',
+        content: 'after',
+        kind: FileChangeKind.modify,
+        reason: 'invalid absent modify',
+        precondition: TextFilePrecondition.absent(),
+      ),
+    ]) {
+      expect(
+        () => ChangePlan(
+          summary: 'invalid precondition',
+          projectRoot: Directory('/work/app'),
+          files: [change],
+        ),
+        throwsArgumentError,
+      );
+    }
+  });
+
   test('exposes immutable plan collections', () {
     final plan = ChangePlan(
       summary: 'immutable',

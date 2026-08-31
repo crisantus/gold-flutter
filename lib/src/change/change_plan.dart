@@ -4,18 +4,36 @@ import 'package:path/path.dart' as p;
 
 enum FileChangeKind { create, modify }
 
+enum TextFilePreconditionKind { absent, exactContent }
+
+/// An opt-in preview-time condition for a planned UTF-8 text-file change.
+final class TextFilePrecondition {
+  const TextFilePrecondition.absent()
+      : kind = TextFilePreconditionKind.absent,
+        expectedContent = null;
+
+  const TextFilePrecondition.exact(String content)
+      : kind = TextFilePreconditionKind.exactContent,
+        expectedContent = content;
+
+  final TextFilePreconditionKind kind;
+  final String? expectedContent;
+}
+
 final class PlannedFileChange {
   const PlannedFileChange({
     required this.relativePath,
     required this.content,
     required this.kind,
     required this.reason,
+    this.precondition,
   });
 
   final String relativePath;
   final String content;
   final FileChangeKind kind;
   final String reason;
+  final TextFilePrecondition? precondition;
 }
 
 final class PlannedCommand {
@@ -62,6 +80,7 @@ final class ChangePlan {
     final paths = <String>{};
     for (final change in changes) {
       final path = _validateRelativePath(change.relativePath);
+      _validatePrecondition(change);
       if (!paths.add(path)) {
         throw ArgumentError('Duplicate planned file path: $path');
       }
@@ -71,10 +90,29 @@ final class ChangePlan {
           content: change.content,
           kind: change.kind,
           reason: change.reason,
+          precondition: change.precondition,
         ),
       );
     }
     return normalized;
+  }
+
+  static void _validatePrecondition(PlannedFileChange change) {
+    final precondition = change.precondition;
+    if (precondition == null) {
+      return;
+    }
+    final coherent = switch ((change.kind, precondition.kind)) {
+      (FileChangeKind.create, TextFilePreconditionKind.absent) => true,
+      (FileChangeKind.modify, TextFilePreconditionKind.exactContent) => true,
+      _ => false,
+    };
+    if (!coherent) {
+      throw ArgumentError(
+        'Text-file precondition ${precondition.kind.name} is not valid for '
+        '${change.kind.name}: ${change.relativePath}',
+      );
+    }
   }
 
   static List<String> _normalizeAndValidateRoots(Iterable<String> roots) {

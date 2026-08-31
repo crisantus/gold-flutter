@@ -597,6 +597,189 @@ void main() {
     expect(fixture.file('lib/missing.dart').existsSync(), isFalse);
   });
 
+  test('aborts all writes when an absence precondition no longer holds',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {
+        'lib/existing.dart': 'before',
+        'lib/appeared.dart': 'concurrent content',
+      },
+    );
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({
+      'flutter analyze': 'No issues found',
+    });
+    final fileSystem = _TrackingSnapshotFileSystem();
+    addTearDown(fileSystem.dispose);
+    final plan = ChangePlan(
+      summary: 'guard an expected create',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'would update',
+          precondition: TextFilePrecondition.exact('before'),
+        ),
+        PlannedFileChange(
+          relativePath: 'lib/appeared.dart',
+          content: 'generated',
+          kind: FileChangeKind.create,
+          reason: 'would create',
+          precondition: TextFilePrecondition.absent(),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['analyze'],
+          reason: 'must not run',
+          mutatesFiles: false,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: executor,
+      fileSystem: fileSystem,
+    ).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(report.created, isEmpty);
+    expect(report.modified, isEmpty);
+    expect(executor.calls, isEmpty);
+    expect(fileSystem.snapshotDirectory, isNull);
+    expect(report.output, contains('lib/appeared.dart'));
+    expect(report.output, contains('expected file to be absent'));
+    expect(fixture.file('lib/existing.dart').readAsStringSync(), 'before');
+    expect(
+      fixture.file('lib/appeared.dart').readAsStringSync(),
+      'concurrent content',
+    );
+  });
+
+  test('aborts before commands when exact original content has changed',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/existing.dart': 'changed concurrently'},
+    );
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({
+      'flutter analyze': 'No issues found',
+    });
+    final plan = ChangePlan(
+      summary: 'guard an expected modify',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'would update',
+          precondition: TextFilePrecondition.exact('previewed content'),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['analyze'],
+          reason: 'must not run',
+          mutatesFiles: false,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('lib/existing.dart'));
+    expect(report.output, contains('original content changed'));
+    expect(
+      fixture.file('lib/existing.dart').readAsStringSync(),
+      'changed concurrently',
+    );
+  });
+
+  test('aborts before commands when an exact-content file disappeared',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({
+      'flutter analyze': 'No issues found',
+    });
+    final plan = ChangePlan(
+      summary: 'guard a removed modify',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/missing.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'would update',
+          precondition: TextFilePrecondition.exact('previewed content'),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['analyze'],
+          reason: 'must not run',
+          mutatesFiles: false,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('lib/missing.dart'));
+    expect(report.output, contains('file is missing'));
+    expect(fixture.file('lib/missing.dart').existsSync(), isFalse);
+  });
+
+  test('applies guarded changes when every precondition still holds', () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/existing.dart': 'before'},
+    );
+    addTearDown(fixture.dispose);
+    final plan = ChangePlan(
+      summary: 'apply guarded files',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'after',
+          kind: FileChangeKind.modify,
+          reason: 'update existing',
+          precondition: TextFilePrecondition.exact('before'),
+        ),
+        PlannedFileChange(
+          relativePath: 'lib/new.dart',
+          content: 'new',
+          kind: FileChangeKind.create,
+          reason: 'create new',
+          precondition: TextFilePrecondition.absent(),
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: FakeProcessExecutor(const {}),
+    ).execute(plan);
+
+    expect(report.success, isTrue);
+    expect(report.modified, ['lib/existing.dart']);
+    expect(report.created, ['lib/new.dart']);
+    expect(fixture.file('lib/existing.dart').readAsStringSync(), 'after');
+    expect(fixture.file('lib/new.dart').readAsStringSync(), 'new');
+  });
+
   test('creates and modifies files and reports successful commands', () async {
     final fixture = await ProjectFixture.create(
       files: {'lib/existing.dart': 'old'},

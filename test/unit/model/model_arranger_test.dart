@@ -123,6 +123,94 @@ void main() {
     );
   });
 
+  test('arranges a supported private model when no test is requested',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/private_model.dart': _privateModel},
+    );
+    addTearDown(fixture.dispose);
+
+    final plan = await arranger.plan(
+      project: _inspection(fixture),
+      path: 'lib/domain/models/private_model.dart',
+      addCopyWith: false,
+      addTest: false,
+    );
+
+    expect(plan.files, hasLength(1));
+    expect(plan.files.single.content, contains('class _PrivateModel'));
+  });
+
+  test('refuses a focused test for a private root class before planning',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/private_model.dart': _privateModel},
+    );
+    addTearDown(fixture.dispose);
+
+    expect(
+      () => arranger.plan(
+        project: _inspection(fixture),
+        path: 'lib/domain/models/private_model.dart',
+        addCopyWith: false,
+        addTest: true,
+      ),
+      throwsA(
+        isA<ModelArrangementException>().having(
+          (error) => error.message,
+          'message',
+          contains('_PrivateModel'),
+        ),
+      ),
+    );
+  });
+
+  test('refuses a focused test for a private referenced field', () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/private_field.dart': _privateFieldModel},
+    );
+    addTearDown(fixture.dispose);
+
+    expect(
+      () => arranger.plan(
+        project: _inspection(fixture),
+        path: 'lib/domain/models/private_field.dart',
+        addCopyWith: false,
+        addTest: true,
+      ),
+      throwsA(
+        isA<ModelArrangementException>().having(
+          (error) => error.message,
+          'message',
+          contains('ReportModel._id'),
+        ),
+      ),
+    );
+  });
+
+  test('refuses a focused test for a private referenced enum type', () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/private_enum.dart': _privateEnumModel},
+    );
+    addTearDown(fixture.dispose);
+
+    expect(
+      () => arranger.plan(
+        project: _inspection(fixture),
+        path: 'lib/domain/models/private_enum.dart',
+        addCopyWith: false,
+        addTest: true,
+      ),
+      throwsA(
+        isA<ModelArrangementException>().having(
+          (error) => error.message,
+          'message',
+          contains('_Status'),
+        ),
+      ),
+    );
+  });
+
   test('plans one model write, covered format, and non-mutating analysis',
       () async {
     final fixture = await ProjectFixture.create(
@@ -141,6 +229,14 @@ void main() {
     expect(
         plan.files.single.relativePath, 'lib/domain/models/report_model.dart');
     expect(plan.files.single.kind, FileChangeKind.modify);
+    expect(
+      plan.files.single.precondition?.kind,
+      TextFilePreconditionKind.exactContent,
+    );
+    expect(
+      plan.files.single.precondition?.expectedContent,
+      _supportedModel,
+    );
     expect(
       plan.files.single.reason,
       'Arrange models using the EyeAsk standard',
@@ -175,6 +271,10 @@ void main() {
     );
     expect(plan.files[1].kind, FileChangeKind.create);
     expect(
+      plan.files[1].precondition?.kind,
+      TextFilePreconditionKind.absent,
+    );
+    expect(
       plan.files[1].content.split('\n').first,
       ModelTestRenderer.ownershipMarker,
     );
@@ -208,6 +308,10 @@ void main() {
     );
 
     expect(ownedPlan.files[1].kind, FileChangeKind.modify);
+    expect(
+      ownedPlan.files[1].precondition?.expectedContent,
+      '${ModelTestRenderer.ownershipMarker}\nold generated test\n',
+    );
 
     await fixture.write(
       'test/domain/models/report_model_test.dart',
@@ -237,6 +341,134 @@ void main() {
           ),
         ),
       ),
+    );
+  });
+
+  test('aborts before writes when an owned test loses its marker after plan',
+      () async {
+    const originalTest =
+        '${ModelTestRenderer.ownershipMarker}\nold generated test\n';
+    final fixture = await ProjectFixture.create(
+      files: {
+        'lib/domain/models/report_model.dart': _supportedModel,
+        'test/domain/models/report_model_test.dart': originalTest,
+      },
+    );
+    addTearDown(fixture.dispose);
+    final plan = await arranger.plan(
+      project: _inspection(fixture),
+      path: 'lib/domain/models/report_model.dart',
+      addCopyWith: false,
+      addTest: true,
+    );
+    const concurrentTest = '// Ownership removed after preview.\n';
+    await fixture.write(
+      'test/domain/models/report_model_test.dart',
+      concurrentTest,
+    );
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/domain/models/report_model.dart '
+          'test/domain/models/report_model_test.dart': 'formatted',
+      'flutter analyze': 'No issues found',
+      'flutter test test/domain/models/report_model_test.dart': 'passed',
+    });
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(
+        report.output, contains('test/domain/models/report_model_test.dart'));
+    expect(report.output, contains('original content changed'));
+    expect(
+      fixture.file('lib/domain/models/report_model.dart').readAsStringSync(),
+      _supportedModel,
+    );
+    expect(
+      fixture
+          .file('test/domain/models/report_model_test.dart')
+          .readAsStringSync(),
+      concurrentTest,
+    );
+  });
+
+  test('aborts before writes when a missing test appears after planning',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/report_model.dart': _supportedModel},
+    );
+    addTearDown(fixture.dispose);
+    final plan = await arranger.plan(
+      project: _inspection(fixture),
+      path: 'lib/domain/models/report_model.dart',
+      addCopyWith: false,
+      addTest: true,
+    );
+    const concurrentTest = '// Application-owned test appeared.\n';
+    await fixture.write(
+      'test/domain/models/report_model_test.dart',
+      concurrentTest,
+    );
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/domain/models/report_model.dart '
+          'test/domain/models/report_model_test.dart': 'formatted',
+      'flutter analyze': 'No issues found',
+      'flutter test test/domain/models/report_model_test.dart': 'passed',
+    });
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(
+        report.output, contains('test/domain/models/report_model_test.dart'));
+    expect(report.output, contains('expected file to be absent'));
+    expect(
+      fixture.file('lib/domain/models/report_model.dart').readAsStringSync(),
+      _supportedModel,
+    );
+    expect(
+      fixture
+          .file('test/domain/models/report_model_test.dart')
+          .readAsStringSync(),
+      concurrentTest,
+    );
+  });
+
+  test('aborts before commands when the model changes after planning',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/report_model.dart': _supportedModel},
+    );
+    addTearDown(fixture.dispose);
+    final plan = await arranger.plan(
+      project: _inspection(fixture),
+      path: 'lib/domain/models/report_model.dart',
+      addCopyWith: false,
+      addTest: false,
+    );
+    const concurrentModel = '// Model changed after preview.\n';
+    await fixture.write(
+      'lib/domain/models/report_model.dart',
+      concurrentModel,
+    );
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/domain/models/report_model.dart': 'formatted',
+      'flutter analyze': 'No issues found',
+    });
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('lib/domain/models/report_model.dart'));
+    expect(report.output, contains('original content changed'));
+    expect(
+      fixture.file('lib/domain/models/report_model.dart').readAsStringSync(),
+      concurrentModel,
     );
   });
 
@@ -320,4 +552,41 @@ const _unsupportedModel = r'''class ReportModel {
         grouped: json?["grouped"] as Map<String, List<Object?>>,
       );
 }
+''';
+
+const _privateModel = r'''class _PrivateModel {
+  final String id;
+
+  _PrivateModel({required this.id});
+
+  factory _PrivateModel.fromJson(Map<String, dynamic>? json) => _PrivateModel(
+        id: (json?["id"] ?? "").toString(),
+      );
+}
+''';
+
+const _privateFieldModel = r'''class ReportModel {
+  final String _id;
+
+  ReportModel({required this._id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        _id: (json?["id"] ?? "").toString(),
+      );
+}
+''';
+
+const _privateEnumModel = r'''enum _Status { active }
+
+class ReportModel {
+  final _Status status;
+
+  ReportModel({required this.status});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        status: _statusFromJson(json?["status"]),
+      );
+}
+
+_Status _statusFromJson(dynamic value) => _Status.active;
 ''';
