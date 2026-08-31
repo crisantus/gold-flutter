@@ -19,12 +19,18 @@ void main() {
     final spec = result.spec!;
     expect(spec.imports, ["import 'dart:convert';"]);
     expect(spec.rootClassName, 'ReportModel');
-    expect(spec.classes.map((model) => model.name), ['ReportModel']);
+    expect(spec.classes.map((model) => model.name), [
+      'ReportModel',
+      'UserModel',
+      'ItemModel',
+    ]);
 
-    final report = spec.classes.single;
+    final report = spec.classes.first;
     expect(report.fields.map((field) => field.name), [
       'id',
       'page',
+      'price',
+      'total',
       'ready',
       'createdAt',
       'deletedAt',
@@ -34,6 +40,8 @@ void main() {
     expect(report.fields.map((field) => field.jsonKey), [
       'id',
       'current_page',
+      'price',
+      'total',
       'ready',
       'created_at',
       'deleted_at',
@@ -43,6 +51,8 @@ void main() {
     expect(report.fields.map((field) => field.typeSource), [
       'String',
       'int',
+      'double',
+      'num',
       'bool',
       'DateTime',
       'DateTime?',
@@ -52,15 +62,17 @@ void main() {
     expect(report.fields.map((field) => field.kind), [
       ModelFieldKind.string,
       ModelFieldKind.integer,
+      ModelFieldKind.doubleValue,
+      ModelFieldKind.numeric,
       ModelFieldKind.boolean,
       ModelFieldKind.dateTime,
       ModelFieldKind.dateTime,
       ModelFieldKind.nestedModel,
       ModelFieldKind.list,
     ]);
-    expect(report.fields[4].isNullable, isTrue);
-    expect(report.fields[5].nestedType, 'UserModel');
-    expect(report.fields[6].nestedType, 'ItemModel');
+    expect(report.fields[6].isNullable, isTrue);
+    expect(report.fields[7].nestedType, 'UserModel');
+    expect(report.fields[8].nestedType, 'ItemModel');
     expect(report.preservedMembers, [r"String get label => '$id:$page';"]);
   });
 
