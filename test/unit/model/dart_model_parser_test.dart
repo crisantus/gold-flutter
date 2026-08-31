@@ -174,6 +174,111 @@ class ReportModel {
     expect(result.diagnostics.join('\n'), contains('ReportModel.status'));
   });
 
+  test('refuses list fields whose local element type is an enum', () {
+    const source = '''
+enum Status { active, inactive }
+
+class ReportModel {
+  final List<Status> statuses;
+
+  ReportModel({required this.statuses});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        statuses: (json?["statuses"] is List
+                ? json!["statuses"] as List
+                : [])
+            .map((item) => _statusFromJson(item))
+            .toList(),
+      );
+}
+
+Status _statusFromJson(dynamic value) {
+  return Status.values.firstWhere(
+    (status) => status.name == value?.toString(),
+    orElse: () => Status.inactive,
+  );
+}
+''';
+
+    final result = parser.parse(source, 'local_enum_list.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.statuses'));
+  });
+
+  test('refuses list fields that invoke an enum-converter shape', () {
+    const source = '''
+class ReportModel {
+  final List<RemoteStatus> statuses;
+
+  ReportModel({required this.statuses});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        statuses: (json?["statuses"] is List
+                ? json!["statuses"] as List
+                : [])
+            .map((item) => _statusFromJson(item))
+            .toList(),
+      );
+}
+
+RemoteStatus _statusFromJson(dynamic value) => throw UnimplementedError();
+''';
+
+    final result = parser.parse(source, 'converter_enum_list.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('ReportModel.statuses'));
+  });
+
+  test('accepts primitive, date, and model list element types', () {
+    const source = '''
+class ReportModel {
+  final List<int> counts;
+  final List<DateTime> dates;
+  final List<ItemModel> items;
+
+  ReportModel({
+    required this.counts,
+    required this.dates,
+    required this.items,
+  });
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        counts: (json?["counts"] is List ? json!["counts"] as List : [])
+            .map((item) => int.tryParse(item.toString()) ?? 0)
+            .toList(),
+        dates: (json?["dates"] is List ? json!["dates"] as List : [])
+            .map((item) => DateTime.parse(item.toString()))
+            .toList(),
+        items: (json?["items"] is List ? json!["items"] as List : [])
+            .map((item) => ItemModel.fromJson(item))
+            .toList(),
+      );
+}
+
+class ItemModel {
+  final String id;
+
+  ItemModel({required this.id});
+
+  factory ItemModel.fromJson(Map<String, dynamic>? json) => ItemModel(
+        id: (json?["id"] ?? "").toString(),
+      );
+}
+''';
+
+    final result = parser.parse(source, 'supported_lists.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    expect(
+      result.spec!.classes.first.fields.map((field) => field.nestedType),
+      ['int', 'DateTime', 'ItemModel'],
+    );
+  });
+
   test('preserves ordered classes and custom source metadata exactly', () {
     const source = '''
 import 'package:meta/meta.dart';
@@ -264,7 +369,8 @@ class ReportModel {
     expect(result.spec!.classes.single.fields.single.jsonKey, 'id');
   });
 
-  test('preserves uncertain same-name members and copyWith exactly', () {
+  test('preserves safe empty accessors, custom helpers, and copyWith exactly',
+      () {
     const source = '''
 class ReportModel {
   final String id;
@@ -278,11 +384,6 @@ class ReportModel {
   bool get empty => id.isEmpty;
 
   set empty(bool value) {}
-
-  Map<String, dynamic> toJson(int version) => {
-        "id": id,
-        "version": version,
-      };
 
   List<ReportModel> fromJsonList(int version) => [this];
 
@@ -300,15 +401,48 @@ class ReportModel {
     expect(model.preservedMembers, [
       'bool get empty => id.isEmpty;',
       'set empty(bool value) {}',
-      '''Map<String, dynamic> toJson(int version) => {
-        "id": id,
-        "version": version,
-      };''',
       'List<ReportModel> fromJsonList(int version) => [this];',
       '''ReportModel copyWith({String? id}) {
     return ReportModel(id: id ?? this.id);
   }''',
     ]);
+  });
+
+  test('refuses custom methods that collide with generated structure', () {
+    const collidingMembers = {
+      'toJson': '''Map<String, dynamic> toJson(int version) => {
+    "id": id,
+    "version": version,
+  };''',
+      'fromJson': 'String fromJson(int version) => id;',
+      'empty': 'ReportModel empty(int version) => this;',
+    };
+
+    for (final entry in collidingMembers.entries) {
+      final source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        id: (json?["id"] ?? "").toString(),
+      );
+
+  ${entry.value}
+}
+''';
+
+      final result = parser.parse(source, '${entry.key}_collision.dart');
+
+      expect(result.isSafe, isFalse, reason: entry.key);
+      expect(result.spec, isNull, reason: entry.key);
+      expect(
+        result.diagnostics.join('\n'),
+        contains('ReportModel.${entry.key}'),
+        reason: entry.key,
+      );
+    }
   });
 
   test('omits only supported structural method signatures', () {

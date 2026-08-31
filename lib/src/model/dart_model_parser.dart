@@ -217,6 +217,13 @@ final class DartModelParser {
         if (_isSupportedStructuralMethod(member, className)) {
           continue;
         }
+        if (_collidesWithGeneratedStructure(member)) {
+          diagnostics.add(
+            'Unsupported structural member $className.$name in '
+            '$path:${member.offset}.',
+          );
+          continue;
+        }
       }
 
       preservedMembers.add(_sourceSlice(source, member));
@@ -279,6 +286,14 @@ final class DartModelParser {
           diagnostics.add(
             'Unable to uniquely discover a JSON key for '
             '$className.${field.name} in $path.',
+          );
+          continue;
+        }
+        if (field.shape.kind == ModelFieldKind.list &&
+            (enumNames.contains(field.shape.nestedType) ||
+                _callsEnumConverterShape(expression, converterNames))) {
+          diagnostics.add(
+            'Unsupported enum list field $className.${field.name} in $path.',
           );
           continue;
         }
@@ -459,6 +474,15 @@ bool _callsNamed(Expression expression, String name) {
   final visitor = _NamedCallVisitor(name);
   expression.accept(visitor);
   return visitor.found;
+}
+
+bool _callsEnumConverterShape(
+  Expression expression,
+  Set<String> converterNames,
+) {
+  return converterNames
+      .where((name) => name.startsWith('_') && name.endsWith('FromJson'))
+      .any((name) => _callsNamed(expression, name));
 }
 
 String _sourceSlice(String source, AstNode node) {
@@ -655,6 +679,18 @@ bool _isSupportedStructuralMethod(
             method.returnType,
             'List<Map<String, dynamic>>',
           );
+    default:
+      return false;
+  }
+}
+
+bool _collidesWithGeneratedStructure(MethodDeclaration method) {
+  switch (method.name.lexeme) {
+    case 'fromJson':
+    case 'toJson':
+      return true;
+    case 'empty':
+      return !method.isGetter && !method.isSetter;
     default:
       return false;
   }

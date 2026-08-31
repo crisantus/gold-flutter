@@ -97,21 +97,19 @@ void _writeClass(
     buffer.writeln('  final ${field.typeSource} ${field.name};');
   }
 
-  if (model.fields.isNotEmpty) {
-    buffer.writeln();
-    _writeConstructor(buffer, model);
-    buffer.writeln();
-    _writeFromJson(buffer, model);
-    buffer.writeln();
-    _writeEmpty(buffer, model);
-    buffer.writeln();
-    _writeToJson(
-      buffer,
-      model,
-      classNames: classNames,
-      enumNames: enumNames,
-    );
-  }
+  buffer.writeln();
+  _writeConstructor(buffer, model);
+  buffer.writeln();
+  _writeFromJson(buffer, model);
+  buffer.writeln();
+  _writeEmpty(buffer, model);
+  buffer.writeln();
+  _writeToJson(
+    buffer,
+    model,
+    classNames: classNames,
+    enumNames: enumNames,
+  );
 
   final copyWithMembers = model.preservedMembers
       .where((member) => _isCopyWithMember(member, model.name));
@@ -131,6 +129,10 @@ void _writeClass(
 }
 
 void _writeConstructor(StringBuffer buffer, ModelClassSpec model) {
+  if (model.fields.isEmpty) {
+    buffer.writeln('  ${model.name}();');
+    return;
+  }
   if (model.fields.length == 1) {
     final field = model.fields.single;
     buffer.writeln(
@@ -147,6 +149,13 @@ void _writeConstructor(StringBuffer buffer, ModelClassSpec model) {
 }
 
 void _writeFromJson(StringBuffer buffer, ModelClassSpec model) {
+  if (model.fields.isEmpty) {
+    buffer.writeln(
+      '  factory ${model.name}.fromJson(Map<String, dynamic>? json) => '
+      '${model.name}();',
+    );
+    return;
+  }
   buffer.writeln(
     '  factory ${model.name}.fromJson(Map<String, dynamic>? json) => '
     '${model.name}(',
@@ -159,67 +168,67 @@ void _writeFromJson(StringBuffer buffer, ModelClassSpec model) {
 
 void _writeFromJsonField(StringBuffer buffer, ModelFieldSpec field) {
   final name = field.name;
-  final key = field.jsonKey;
+  final key = _dartDoubleQuotedString(field.jsonKey);
   switch (field.kind) {
     case ModelFieldKind.string:
-      buffer.writeln('        $name: (json?["$key"] ?? "").toString(),');
+      buffer.writeln('        $name: (json?[$key] ?? "").toString(),');
     case ModelFieldKind.integer:
       final fallback = field.isNullable ? '' : ' ?? 0';
       buffer.writeln(
         '        $name: int.tryParse('
-        '(json?["$key"] ?? "").toString())$fallback,',
+        '(json?[$key] ?? "").toString())$fallback,',
       );
     case ModelFieldKind.doubleValue:
       final fallback = field.isNullable ? '' : ' ?? 0.0';
       buffer.writeln(
         '        $name: double.tryParse('
-        '(json?["$key"] ?? "").toString())$fallback,',
+        '(json?[$key] ?? "").toString())$fallback,',
       );
     case ModelFieldKind.numeric:
       final fallback = field.isNullable ? '' : ' ?? 0';
       buffer.writeln(
         '        $name: num.tryParse('
-        '(json?["$key"] ?? "").toString())$fallback,',
+        '(json?[$key] ?? "").toString())$fallback,',
       );
     case ModelFieldKind.boolean:
       buffer
-        ..writeln('        $name: json?["$key"] is bool')
-        ..writeln('            ? json!["$key"] as bool')
+        ..writeln('        $name: json?[$key] is bool')
+        ..writeln('            ? json![$key] as bool')
         ..writeln(
-          '            : (json?["$key"] ?? "").toString() == "true",',
+          '            : (json?[$key] ?? "").toString() == "true",',
         );
     case ModelFieldKind.dateTime:
       if (field.isNullable) {
         buffer
           ..writeln('        $name: DateTime.tryParse(')
-          ..writeln('          (json?["$key"] ?? "").toString(),')
+          ..writeln('          (json?[$key] ?? "").toString(),')
           ..writeln('        ),');
       } else {
         buffer
           ..writeln('        $name: DateTime.tryParse(')
-          ..writeln('              (json?["$key"] ?? "").toString(),')
+          ..writeln('              (json?[$key] ?? "").toString(),')
           ..writeln('            ) ??')
           ..writeln('            DateTime.now(),');
       }
     case ModelFieldKind.nestedModel:
       buffer.writeln(
-        '        $name: ${field.nestedType}.fromJson(json?["$key"]),',
+        '        $name: ${field.nestedType}.fromJson(json?[$key]),',
       );
     case ModelFieldKind.list:
       _writeListFromJson(buffer, field);
     case ModelFieldKind.enumeration:
       buffer.writeln(
-        '        $name: _${field.name}FromJson(json?["$key"]),',
+        '        $name: _${field.name}FromJson(json?[$key]),',
       );
   }
 }
 
 void _writeListFromJson(StringBuffer buffer, ModelFieldSpec field) {
-  final key = field.jsonKey;
+  final key = _dartDoubleQuotedString(field.jsonKey);
   final elementType = field.nestedType!;
   buffer.writeln(
     '        ${field.name}: '
-    '(json?["$key"] is List ? json!["$key"] as List : [])',
+    '(json?[$key] is List ? json![$key] as List : [])',
   );
   final conversion = switch (elementType) {
     'String' => 'item.toString()',
@@ -236,6 +245,10 @@ void _writeListFromJson(StringBuffer buffer, ModelFieldSpec field) {
 }
 
 void _writeEmpty(StringBuffer buffer, ModelClassSpec model) {
+  if (model.fields.isEmpty) {
+    buffer.writeln('  factory ${model.name}.empty() => ${model.name}();');
+    return;
+  }
   buffer.writeln('  factory ${model.name}.empty() => ${model.name}(');
   for (final field in model.fields) {
     buffer.writeln('        ${field.name}: ${_emptyValue(field)},');
@@ -266,6 +279,10 @@ void _writeToJson(
   required Set<String> classNames,
   required Set<String> enumNames,
 }) {
+  if (model.fields.isEmpty) {
+    buffer.writeln('  Map<String, dynamic> toJson() => {};');
+    return;
+  }
   buffer.writeln('  Map<String, dynamic> toJson() => {');
   for (final field in model.fields) {
     final value = _toJsonValue(
@@ -273,7 +290,8 @@ void _writeToJson(
       classNames: classNames,
       enumNames: enumNames,
     );
-    buffer.writeln('        "${field.jsonKey}": $value,');
+    final key = _dartDoubleQuotedString(field.jsonKey);
+    buffer.writeln('        $key: $value,');
   }
   buffer.writeln('      };');
 }
@@ -360,4 +378,41 @@ bool _declaresHelper(List<String> declarations, String helperName) {
 
 String _lowercaseFirst(String value) {
   return '${value[0].toLowerCase()}${value.substring(1)}';
+}
+
+String _dartDoubleQuotedString(String value) {
+  final buffer = StringBuffer('"');
+  for (final rune in value.runes) {
+    switch (rune) {
+      case 0x08:
+        buffer.write(r'\b');
+      case 0x09:
+        buffer.write(r'\t');
+      case 0x0a:
+        buffer.write(r'\n');
+      case 0x0c:
+        buffer.write(r'\f');
+      case 0x0d:
+        buffer.write(r'\r');
+      case 0x22:
+        buffer.write(r'\"');
+      case 0x24:
+        buffer.write(r'\$');
+      case 0x5c:
+        buffer.write(r'\\');
+      default:
+        if (rune < 0x20 ||
+            (rune >= 0x7f && rune <= 0x9f) ||
+            rune == 0x2028 ||
+            rune == 0x2029) {
+          buffer
+            ..write(r'\u{')
+            ..write(rune.toRadixString(16))
+            ..write('}');
+        } else {
+          buffer.writeCharCode(rune);
+        }
+    }
+  }
+  return '${buffer.toString()}"';
 }
