@@ -7,7 +7,7 @@ void main() {
   test('model specs preserve source ordering and cannot be mutated', () {
     final spec = ModelClassSpec(
       name: 'UserModel',
-      fields: const [
+      fields: [
         ModelFieldSpec(
           name: 'id',
           typeSource: 'String',
@@ -30,7 +30,7 @@ void main() {
   });
 
   test('model specs defensively copy every source-ordered collection', () {
-    const field = ModelFieldSpec(
+    final field = ModelFieldSpec(
       name: 'id',
       typeSource: 'String',
       jsonKey: 'id',
@@ -96,7 +96,7 @@ void main() {
         nestedType: null,
         sourceOffset: 0,
       ),
-      throwsA(isA<AssertionError>()),
+      throwsArgumentError,
     );
     expect(
       () => ModelFieldSpec(
@@ -108,7 +108,7 @@ void main() {
         nestedType: null,
         sourceOffset: 0,
       ),
-      throwsA(isA<AssertionError>()),
+      throwsArgumentError,
     );
     expect(
       () => ModelFieldSpec(
@@ -117,10 +117,34 @@ void main() {
         jsonKey: 'user',
         kind: ModelFieldKind.nestedModel,
         isNullable: false,
+        nestedType: '',
+        sourceOffset: 0,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => ModelFieldSpec(
+        name: 'users',
+        typeSource: 'List<UserModel>',
+        jsonKey: 'users',
+        kind: ModelFieldKind.list,
+        isNullable: false,
         nestedType: null,
         sourceOffset: 0,
       ),
-      throwsA(isA<AssertionError>()),
+      throwsArgumentError,
+    );
+    expect(
+      () => ModelFieldSpec(
+        name: 'status',
+        typeSource: 'Status',
+        jsonKey: 'status',
+        kind: ModelFieldKind.enumeration,
+        isNullable: false,
+        nestedType: null,
+        sourceOffset: 0,
+      ),
+      throwsArgumentError,
     );
     expect(
       () => ModelClassSpec(

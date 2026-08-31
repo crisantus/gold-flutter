@@ -10,7 +10,7 @@ executables:
   gold_flutter: gold_flutter
 
 dependencies:
-  analyzer: ^14.1.0
+  analyzer: ^7.7.1
   args: ^2.7.0
   path: ^1.9.1
   yaml: ^3.1.3
