@@ -972,7 +972,16 @@ Map<String, List<List<String>>> _jsonAliases(FunctionBody body) {
       if (initializer == null) {
         continue;
       }
-      final paths = _jsonTargetPaths(initializer, aliases);
+      var paths = _jsonTargetPaths(initializer, aliases);
+      if (paths.isEmpty &&
+          _referencesAnyIdentifier(
+            initializer,
+            {'json', ...aliases.keys},
+          )) {
+        paths = const [
+          [_opaqueJsonAliasSegment],
+        ];
+      }
       if (paths.isNotEmpty) {
         aliases[variable.name.lexeme] = paths;
       }
@@ -980,6 +989,8 @@ Map<String, List<List<String>>> _jsonAliases(FunctionBody body) {
   }
   return aliases;
 }
+
+const _opaqueJsonAliasSegment = '\u0000gold_flutter_opaque_json_alias';
 
 List<List<String>> _uniquePaths(Iterable<List<String>> paths) {
   final unique = <List<String>>[];

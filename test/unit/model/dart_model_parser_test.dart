@@ -1039,6 +1039,40 @@ class ReportModel {
     expect(model.supportsDirectObjectFromJson, isFalse);
   });
 
+  test('preserves helper-wrapped JSON aliases instead of flattening them', () {
+    const factorySource = '''factory ReportModel.fromJson(
+    Map<String, dynamic>? json,
+  ) {
+    final payload = _payload(json);
+    return ReportModel(
+      id: (payload["report_id"] ?? "").toString(),
+    );
+  }''';
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  $factorySource
+}
+
+Map<String, dynamic> _payload(Map<String, dynamic>? json) {
+  final data = json?["data"];
+  return data is Map<String, dynamic> ? data : const {};
+}
+''';
+
+    final result = parser.parse(source, 'wrapped_alias.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    final model = result.spec!.classes.single;
+    expect(model.fields.single.jsonKey, 'report_id');
+    expect(model.fields.single.isJsonKeyDerived, isFalse);
+    expect(model.preservedFromJson, factorySource);
+    expect(model.supportsDirectObjectFromJson, isFalse);
+  });
+
   test('records exact supported top-level root helper roles from the AST', () {
     final source = File('test/fixtures/models/direct_list_helpers.dart')
         .readAsStringSync();
