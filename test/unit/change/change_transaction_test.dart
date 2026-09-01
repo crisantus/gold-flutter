@@ -897,6 +897,281 @@ void main() {
     expect(await file.readAsBytes(), const [0xff, 0xfe, 0xfd]);
   });
 
+  test('preserves a strict create that appears before snapshot capture',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final target = fixture.file('lib/appeared.dart');
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/appeared.dart': 'formatted',
+    });
+    final fileSystem = _PhaseRaceFileSystem(
+      onTemporaryDirectoryCreated: (_) async {
+        await target.parent.create(recursive: true);
+        await target.writeAsString('concurrent before snapshot');
+      },
+    );
+    final plan = ChangePlan(
+      summary: 'guard pre-snapshot create race',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/appeared.dart',
+          content: 'generated',
+          kind: FileChangeKind.create,
+          reason: 'would create',
+          precondition: TextFilePrecondition.absent(),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['format', 'lib/appeared.dart'],
+          reason: 'must not format concurrent content',
+          mutatesFiles: true,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: executor,
+      fileSystem: fileSystem,
+    ).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('lib/appeared.dart'));
+    expect(report.output, contains('expected file to be absent'));
+    expect(target.readAsStringSync(), 'concurrent before snapshot');
+  });
+
+  test('preserves a strict create that appears after snapshot observation',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final target = fixture.file('lib/appeared.dart');
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/appeared.dart': 'formatted',
+    });
+    final fileSystem = _PhaseRaceFileSystem(
+      onExistsObserved: (path, observation, exists) async {
+        if (path == target.path && observation == 3 && !exists) {
+          await target.parent.create(recursive: true);
+          await target.writeAsString('concurrent after snapshot');
+        }
+      },
+    );
+    final plan = ChangePlan(
+      summary: 'guard post-snapshot create race',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/appeared.dart',
+          content: 'generated',
+          kind: FileChangeKind.create,
+          reason: 'would create',
+          precondition: TextFilePrecondition.absent(),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['format', 'lib/appeared.dart'],
+          reason: 'must not format concurrent content',
+          mutatesFiles: true,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: executor,
+      fileSystem: fileSystem,
+    ).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('lib/appeared.dart'));
+    expect(report.output, contains('expected file to be absent'));
+    expect(target.readAsStringSync(), 'concurrent after snapshot');
+  });
+
+  test('preserves a strict modify changed after snapshot capture', () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/existing.dart': 'previewed'},
+    );
+    addTearDown(fixture.dispose);
+    final target = fixture.file('lib/existing.dart');
+    final concurrentBytes = [
+      ..._utf8Bom,
+      ...utf8.encode('concurrent after snapshot'),
+    ];
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/existing.dart': 'formatted',
+    });
+    final fileSystem = _PhaseRaceFileSystem(
+      onExistsObserved: (path, observation, exists) async {
+        if (path == target.path && observation == 3 && exists) {
+          await target.writeAsBytes(concurrentBytes);
+        }
+      },
+    );
+    final plan = ChangePlan(
+      summary: 'guard post-snapshot modify race',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'generated',
+          kind: FileChangeKind.modify,
+          reason: 'would modify',
+          precondition: TextFilePrecondition.exact('previewed'),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['format', 'lib/existing.dart'],
+          reason: 'must not format concurrent content',
+          mutatesFiles: true,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: executor,
+      fileSystem: fileSystem,
+    ).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('lib/existing.dart'));
+    expect(report.output, contains('original content changed'));
+    expect(await target.readAsBytes(), concurrentBytes);
+  });
+
+  test('rolls back an earlier create but preserves a later concurrent create',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final first = fixture.file('lib/generated/first.dart');
+    final second = fixture.file('lib/generated/second.dart');
+    final executor = FakeProcessExecutor({
+      'dart format lib/generated/first.dart lib/generated/second.dart':
+          const ProcessOutput(
+        exitCode: 1,
+        stdout: '',
+        stderr: 'must not run',
+      ),
+    });
+    var injected = false;
+    final fileSystem = _PhaseRaceFileSystem(
+      onAfterWrite: (path) async {
+        if (path == first.path && !injected) {
+          injected = true;
+          await second.writeAsString('concurrent later file');
+        }
+      },
+    );
+    final plan = ChangePlan(
+      summary: 'selective rollback',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/generated/first.dart',
+          content: 'generated first',
+          kind: FileChangeKind.create,
+          reason: 'create first',
+          precondition: TextFilePrecondition.absent(),
+        ),
+        PlannedFileChange(
+          relativePath: 'lib/generated/second.dart',
+          content: 'generated second',
+          kind: FileChangeKind.create,
+          reason: 'create second',
+          precondition: TextFilePrecondition.absent(),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const [
+            'format',
+            'lib/generated/first.dart',
+            'lib/generated/second.dart',
+          ],
+          reason: 'must not format concurrent content',
+          mutatesFiles: true,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: executor,
+      fileSystem: fileSystem,
+    ).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isTrue);
+    expect(executor.calls, isEmpty);
+    expect(first.existsSync(), isFalse);
+    expect(second.readAsStringSync(), 'concurrent later file');
+    expect(Directory(fixture.file('lib/generated').path).existsSync(), isTrue);
+  });
+
+  test('does not format strict content changed after its transaction write',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final target = fixture.file('lib/generated.dart');
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/generated.dart': 'formatted',
+    });
+    var injected = false;
+    final fileSystem = _PhaseRaceFileSystem(
+      onAfterWrite: (path) async {
+        if (path == target.path && !injected) {
+          injected = true;
+          await target.writeAsString('concurrent after transaction write');
+        }
+      },
+    );
+    final plan = ChangePlan(
+      summary: 'guard post-write state',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/generated.dart',
+          content: 'generated',
+          kind: FileChangeKind.create,
+          reason: 'create generated file',
+          precondition: TextFilePrecondition.absent(),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['format', 'lib/generated.dart'],
+          reason: 'must not format concurrent content',
+          mutatesFiles: true,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: executor,
+      fileSystem: fileSystem,
+    ).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(executor.calls, isEmpty);
+    expect(report.output, contains('lib/generated.dart'));
+    expect(report.output, contains('changed after transaction write'));
+    expect(target.readAsStringSync(), 'concurrent after transaction write');
+  });
+
   test('creates and modifies files and reports successful commands', () async {
     final fixture = await ProjectFixture.create(
       files: {'lib/existing.dart': 'old'},
@@ -1345,6 +1620,10 @@ final class _FailingRestoreFileSystem implements ProjectFileSystem {
   Future<void> delete(String path) => _delegate.delete(path);
 
   @override
+  Future<bool> deleteEmptyDirectory(String path) =>
+      _delegate.deleteEmptyDirectory(path);
+
+  @override
   Future<bool> exists(String path) => _delegate.exists(path);
 
   @override
@@ -1402,6 +1681,10 @@ final class _TrackingSnapshotFileSystem implements ProjectFileSystem {
   }
 
   @override
+  Future<bool> deleteEmptyDirectory(String path) =>
+      _delegate.deleteEmptyDirectory(path);
+
+  @override
   Future<bool> exists(String path) => _delegate.exists(path);
 
   @override
@@ -1413,4 +1696,68 @@ final class _TrackingSnapshotFileSystem implements ProjectFileSystem {
   @override
   Future<void> writeBytes(String path, List<int> bytes) =>
       _delegate.writeBytes(path, bytes);
+}
+
+typedef _TemporaryDirectoryCallback = Future<void> Function(String path);
+typedef _ExistsObservedCallback = Future<void> Function(
+  String path,
+  int observation,
+  bool exists,
+);
+typedef _WriteCallback = Future<void> Function(String path);
+
+final class _PhaseRaceFileSystem implements ProjectFileSystem {
+  _PhaseRaceFileSystem({
+    this.onTemporaryDirectoryCreated,
+    this.onExistsObserved,
+    this.onAfterWrite,
+  });
+
+  final _TemporaryDirectoryCallback? onTemporaryDirectoryCreated;
+  final _ExistsObservedCallback? onExistsObserved;
+  final _WriteCallback? onAfterWrite;
+  final ProjectFileSystem _delegate = const LocalProjectFileSystem();
+  final Map<String, int> _existenceObservations = {};
+
+  @override
+  Future<String> createTemporaryDirectory(String prefix) async {
+    final path = await _delegate.createTemporaryDirectory(prefix);
+    await onTemporaryDirectoryCreated?.call(path);
+    return path;
+  }
+
+  @override
+  Future<bool> containsLink(String path) => _delegate.containsLink(path);
+
+  @override
+  Future<void> copyTree(String source, String destination) =>
+      _delegate.copyTree(source, destination);
+
+  @override
+  Future<void> delete(String path) => _delegate.delete(path);
+
+  @override
+  Future<bool> deleteEmptyDirectory(String path) =>
+      _delegate.deleteEmptyDirectory(path);
+
+  @override
+  Future<bool> exists(String path) async {
+    final result = await _delegate.exists(path);
+    final observation = (_existenceObservations[path] ?? 0) + 1;
+    _existenceObservations[path] = observation;
+    await onExistsObserved?.call(path, observation, result);
+    return result;
+  }
+
+  @override
+  Future<bool> isLink(String path) => _delegate.isLink(path);
+
+  @override
+  Future<List<int>> readBytes(String path) => _delegate.readBytes(path);
+
+  @override
+  Future<void> writeBytes(String path, List<int> bytes) async {
+    await _delegate.writeBytes(path, bytes);
+    await onAfterWrite?.call(path);
+  }
 }

@@ -227,7 +227,8 @@ void main() {
     );
   });
 
-  test('arrange model apply reports every transaction skip', () async {
+  test('arrange model aborts when its generated test appears before apply',
+      () async {
     final fixture = await ProjectFixture.create(
       files: {'lib/domain/models/report_model.dart': _supportedModel},
     );
@@ -258,11 +259,17 @@ void main() {
       '--yes',
     ]);
 
-    expect(exitCode, 0);
-    expect(io.output, contains('Skipped'));
+    expect(exitCode, 1);
+    expect(executor.calls, isEmpty);
     expect(
       io.output.join('\n'),
       contains('test/domain/models/report_model_test.dart'),
+    );
+    expect(
+      fixture
+          .file('test/domain/models/report_model_test.dart')
+          .readAsStringSync(),
+      'concurrent test content',
     );
   });
 
@@ -365,9 +372,11 @@ final class _AppearingFileSystem implements ProjectFileSystem {
       _delegate.createTemporaryDirectory(prefix);
 
   @override
-  Future<bool> exists(String path) {
-    if (path == appearingPath && ++_appearingPathChecks >= 3) {
-      return Future.value(true);
+  Future<bool> exists(String path) async {
+    if (path == appearingPath && ++_appearingPathChecks == 3) {
+      final appearingFile = File(appearingPath);
+      await appearingFile.parent.create(recursive: true);
+      await appearingFile.writeAsString('concurrent test content');
     }
     return _delegate.exists(path);
   }
@@ -387,6 +396,10 @@ final class _AppearingFileSystem implements ProjectFileSystem {
 
   @override
   Future<void> delete(String path) => _delegate.delete(path);
+
+  @override
+  Future<bool> deleteEmptyDirectory(String path) =>
+      _delegate.deleteEmptyDirectory(path);
 
   @override
   Future<void> copyTree(String source, String destination) =>

@@ -8,6 +8,7 @@ abstract interface class ProjectFileSystem {
   Future<List<int>> readBytes(String path);
   Future<void> writeBytes(String path, List<int> bytes);
   Future<void> delete(String path);
+  Future<bool> deleteEmptyDirectory(String path);
   Future<void> copyTree(String source, String destination);
 }
 
@@ -83,6 +84,20 @@ final class LocalProjectFileSystem implements ProjectFileSystem {
         return;
       default:
         throw FileSystemException('Unsupported file-system entity', path);
+    }
+  }
+
+  @override
+  Future<bool> deleteEmptyDirectory(String path) async {
+    final type = await FileSystemEntity.type(path, followLinks: false);
+    if (type != FileSystemEntityType.directory) {
+      return false;
+    }
+    try {
+      await Directory(path).delete();
+      return true;
+    } on FileSystemException {
+      return false;
     }
   }
 

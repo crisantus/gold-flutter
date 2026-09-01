@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
@@ -22,37 +23,48 @@ final class ChangeTransaction {
     final skipped = <String>[];
     final output = <String>[];
     final snapshots = <_Snapshot>[];
-    final createdParentDirectories = <String>[];
+    final writtenFiles = <String, List<int>>{};
+    final createdParentDirectories = <String>{};
     String? snapshotDirectory;
     Object? rootFailure;
     var restored = false;
-    var mutationStarted = false;
+    var mutatingCommandStarted = false;
 
     try {
       final commandEffects = await _validateCommands(plan);
       await _validateDeclaredPaths(plan);
       await _validatePreconditions(plan);
-      await _recordMissingParentDirectories(
-        plan,
-        createdParentDirectories,
-      );
       snapshotDirectory = await fileSystem.createTemporaryDirectory(
         'gold_change_transaction_',
       );
       await _snapshot(plan, snapshotDirectory, snapshots);
+      await _validatePreconditions(plan);
 
       for (final change in plan.files) {
-        var path = await _rejectLinks(plan, change.relativePath);
-        final exists = await fileSystem.exists(path);
-        if ((change.kind == FileChangeKind.create && exists) ||
-            (change.kind == FileChangeKind.modify && !exists)) {
-          skipped.add(change.relativePath);
-          continue;
+        late final String path;
+        late final List<String> missingParents;
+        if (change.precondition case final precondition?) {
+          missingParents = await _missingParentDirectories(plan, change);
+          path = await _validatePrecondition(plan, change, precondition);
+        } else {
+          var unguardedPath = await _rejectLinks(plan, change.relativePath);
+          final exists = await fileSystem.exists(unguardedPath);
+          if ((change.kind == FileChangeKind.create && exists) ||
+              (change.kind == FileChangeKind.modify && !exists)) {
+            skipped.add(change.relativePath);
+            continue;
+          }
+          missingParents = await _missingParentDirectories(plan, change);
+          unguardedPath = await _rejectLinks(plan, change.relativePath);
+          path = unguardedPath;
         }
 
-        mutationStarted = true;
-        path = await _rejectLinks(plan, change.relativePath);
-        await fileSystem.writeBytes(path, utf8.encode(change.content));
+        final bytes = utf8.encode(change.content);
+        // A non-cooperating process can still race the final validation and
+        // atomic replacement; there is no portable compare-and-swap file API.
+        await fileSystem.writeBytes(path, bytes);
+        writtenFiles[change.relativePath] = List.unmodifiable(bytes);
+        createdParentDirectories.addAll(missingParents);
         switch (change.kind) {
           case FileChangeKind.create:
             created.add(change.relativePath);
@@ -63,8 +75,10 @@ final class ChangeTransaction {
 
       for (var index = 0; index < plan.commands.length; index++) {
         final command = plan.commands[index];
-        if (commandEffects[index] == _CommandEffect.mutating) {
-          mutationStarted = true;
+        if (commandEffects[index] == _CommandEffect.mutating &&
+            !mutatingCommandStarted) {
+          await _validatePostWriteState(plan, writtenFiles);
+          mutatingCommandStarted = true;
         }
         final result = await executor.run(
           command.executable,
@@ -88,13 +102,24 @@ final class ChangeTransaction {
       rootFailure = error;
       _appendDiagnostic(output, error.toString());
     } finally {
-      if (rootFailure != null && mutationStarted) {
+      if (rootFailure != null &&
+          (writtenFiles.isNotEmpty || mutatingCommandStarted)) {
         try {
+          final rollbackSnapshots = mutatingCommandStarted
+              ? snapshots
+              : snapshots
+                  .where(
+                    (snapshot) =>
+                        !snapshot.isRoot &&
+                        writtenFiles.containsKey(snapshot.relativePath),
+                  )
+                  .toList();
           await _restore(
             plan.projectRoot.path,
             snapshotDirectory!,
-            snapshots,
+            rollbackSnapshots,
             createdParentDirectories,
+            expectedOwnedContents: mutatingCommandStarted ? null : writtenFiles,
           );
           restored = true;
         } catch (error) {
@@ -182,8 +207,9 @@ final class ChangeTransaction {
     String projectRoot,
     String snapshotDirectory,
     List<_Snapshot> snapshots,
-    List<String> createdParentDirectories,
-  ) async {
+    Set<String> createdParentDirectories, {
+    required Map<String, List<int>>? expectedOwnedContents,
+  }) async {
     final failures = <Object>[];
     for (final snapshot in snapshots.where((entry) => entry.isRoot)) {
       try {
@@ -222,6 +248,13 @@ final class ChangeTransaction {
           projectRoot,
           snapshot.relativePath,
         );
+        final expectedOwnedContent =
+            expectedOwnedContents?[snapshot.relativePath];
+        if (expectedOwnedContents != null &&
+            (expectedOwnedContent == null ||
+                !await _matchesBytes(original, expectedOwnedContent))) {
+          continue;
+        }
         if (snapshot.existed) {
           final backup = _resolveContainedPath(
             snapshotDirectory,
@@ -249,19 +282,11 @@ final class ChangeTransaction {
       );
     for (final parent in parents) {
       try {
-        var parentPath = await _rejectProjectPath(
+        final parentPath = await _rejectProjectPath(
           projectRoot,
           parent,
-          recursive: true,
         );
-        if (await fileSystem.exists(parentPath)) {
-          parentPath = await _rejectProjectPath(
-            projectRoot,
-            parent,
-            recursive: true,
-          );
-          await fileSystem.delete(parentPath);
-        }
+        await fileSystem.deleteEmptyDirectory(parentPath);
       } catch (error) {
         failures.add(error);
       }
@@ -302,62 +327,106 @@ final class ChangeTransaction {
       if (precondition == null) {
         continue;
       }
+      await _validatePrecondition(plan, change, precondition);
+    }
+  }
+
+  Future<String> _validatePrecondition(
+    ChangePlan plan,
+    PlannedFileChange change,
+    TextFilePrecondition precondition,
+  ) async {
+    final path = await _rejectLinks(plan, change.relativePath);
+    final exists = await fileSystem.exists(path);
+    switch (precondition.kind) {
+      case TextFilePreconditionKind.absent:
+        if (exists) {
+          throw StateError(
+            'File precondition failed for ${change.relativePath}: '
+            'expected file to be absent.',
+          );
+        }
+      case TextFilePreconditionKind.exactContent:
+        if (!exists) {
+          throw StateError(
+            'File precondition failed for ${change.relativePath}: '
+            'expected original content but file is missing.',
+          );
+        }
+        final bytes = await fileSystem.readBytes(path);
+        late final String actualContent;
+        try {
+          actualContent = utf8.decode(bytes);
+        } on FormatException {
+          throw StateError(
+            'File precondition failed for ${change.relativePath}: '
+            'actual file contains invalid UTF-8 text.',
+          );
+        }
+        if (actualContent != precondition.expectedContent!) {
+          throw StateError(
+            'File precondition failed for ${change.relativePath}: '
+            'original content changed after planning.',
+          );
+        }
+    }
+    return path;
+  }
+
+  Future<void> _validatePostWriteState(
+    ChangePlan plan,
+    Map<String, List<int>> writtenFiles,
+  ) async {
+    for (final change in plan.files) {
+      final expectedBytes = writtenFiles[change.relativePath];
+      if (expectedBytes == null) {
+        if (change.precondition != null) {
+          throw StateError(
+            'File changed after transaction write for '
+            '${change.relativePath}: strict change was not written.',
+          );
+        }
+        continue;
+      }
       final path = await _rejectLinks(plan, change.relativePath);
-      final exists = await fileSystem.exists(path);
-      switch (precondition.kind) {
-        case TextFilePreconditionKind.absent:
-          if (exists) {
-            throw StateError(
-              'File precondition failed for ${change.relativePath}: '
-              'expected file to be absent.',
-            );
-          }
-        case TextFilePreconditionKind.exactContent:
-          if (!exists) {
-            throw StateError(
-              'File precondition failed for ${change.relativePath}: '
-              'expected original content but file is missing.',
-            );
-          }
-          final bytes = await fileSystem.readBytes(path);
-          late final String actualContent;
-          try {
-            actualContent = utf8.decode(bytes);
-          } on FormatException {
-            throw StateError(
-              'File precondition failed for ${change.relativePath}: '
-              'actual file contains invalid UTF-8 text.',
-            );
-          }
-          if (actualContent != precondition.expectedContent!) {
-            throw StateError(
-              'File precondition failed for ${change.relativePath}: '
-              'original content changed after planning.',
-            );
-          }
+      if (!await _matchesBytes(path, expectedBytes)) {
+        throw StateError(
+          'File changed after transaction write for ${change.relativePath}: '
+          'refusing to start a mutating command.',
+        );
       }
     }
   }
 
-  Future<void> _recordMissingParentDirectories(
+  Future<bool> _matchesBytes(String path, List<int> expected) async {
+    if (!await fileSystem.exists(path)) {
+      return false;
+    }
+    try {
+      return _bytesEqual(await fileSystem.readBytes(path), expected);
+    } on FileSystemException {
+      return false;
+    }
+  }
+
+  Future<List<String>> _missingParentDirectories(
     ChangePlan plan,
-    List<String> missingParents,
+    PlannedFileChange change,
   ) async {
-    final seen = <String>{};
-    for (final change in plan.files) {
-      var current = '.';
-      final relativePath = ChangePlan.normalizeRelativePath(
-        change.relativePath,
-      );
-      final segments = p.posix.split(relativePath);
-      for (final segment in segments.take(segments.length - 1)) {
-        current = p.posix.join(current, segment);
-        final target = _resolveProjectPath(plan.projectRoot.path, current);
-        if (!await fileSystem.exists(target) && seen.add(current)) {
-          missingParents.add(current);
-        }
+    final missingParents = <String>[];
+    var current = '.';
+    final relativePath = ChangePlan.normalizeRelativePath(
+      change.relativePath,
+    );
+    final segments = p.posix.split(relativePath);
+    for (final segment in segments.take(segments.length - 1)) {
+      current = p.posix.join(current, segment);
+      final target = _resolveProjectPath(plan.projectRoot.path, current);
+      if (!await fileSystem.exists(target)) {
+        missingParents.add(current);
       }
     }
+    return missingParents;
   }
 
   Future<String> _rejectLinks(
@@ -621,6 +690,18 @@ final class ChangeTransaction {
     }
     return true;
   }
+}
+
+bool _bytesEqual(List<int> left, List<int> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 enum _CommandEffect { readOnly, mutating }
