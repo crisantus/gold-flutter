@@ -227,6 +227,49 @@ void main() {
     );
   });
 
+  test('arrange model success reports created modified and preserved results',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {
+        'lib/domain/models/report_model.dart': _existingCopyWithModel,
+      },
+    );
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({
+      'dart format lib/domain/models/report_model.dart '
+          'test/domain/models/report_model_test.dart': 'formatted',
+      'flutter analyze': 'No issues found',
+      'flutter test test/domain/models/report_model_test.dart': 'passed',
+    });
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(
+      io: io,
+      currentDirectory: fixture.root,
+      changeTransaction: ChangeTransaction(executor: executor),
+    ).run([
+      'arrange',
+      'model',
+      '--path',
+      'lib/domain/models/report_model.dart',
+      '--copy-with',
+      '--test',
+      '--yes',
+    ]);
+
+    expect(exitCode, 0);
+    final output = io.output.join('\n');
+    expect(output, contains('Final report'));
+    final finalReport = output.split('Final report').last;
+    expect(finalReport, contains('Created'));
+    expect(finalReport, contains('test/domain/models/report_model_test.dart'));
+    expect(finalReport, contains('Modified'));
+    expect(finalReport, contains('lib/domain/models/report_model.dart'));
+    expect(finalReport, contains('Preserved'));
+    expect(finalReport, contains('ReportModel.copyWith'));
+    expect(finalReport, isNot(contains('Skipped')));
+  });
+
   test('arrange model aborts when its generated test appears before apply',
       () async {
     final fixture = await ProjectFixture.create(
@@ -270,6 +313,17 @@ void main() {
           .file('test/domain/models/report_model_test.dart')
           .readAsStringSync(),
       'concurrent test content',
+    );
+    final output = io.output.join('\n');
+    expect(output, contains('Failure details'));
+    expect(output, contains('expected file to be absent'));
+    expect(output, contains('Restoration status: not needed'));
+    expect(
+      output,
+      contains(
+        'Suggested next action: resolve the reported precondition or path '
+        'change, review the plan, and run the command again.',
+      ),
     );
   });
 
@@ -337,7 +391,17 @@ void main() {
       'flutter analyze',
     ]);
     expect(io.output.join('\n'), contains('fake analyzer failure'));
-    expect(io.output.join('\n'), contains('Changes were restored.'));
+    final output = io.output.join('\n');
+    expect(output, contains('Failure details'));
+    expect(output, contains('Command failed (1): flutter analyze'));
+    expect(output, contains('Restoration status: completed'));
+    expect(
+      output,
+      contains(
+        'Suggested next action: fix the reported operation or tool error, '
+        'review the plan, and run the command again.',
+      ),
+    );
     expect(
       fixture.file('lib/domain/models/report_model.dart').readAsStringSync(),
       _supportedModel,

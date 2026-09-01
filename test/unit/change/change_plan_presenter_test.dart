@@ -110,25 +110,40 @@ void main() {
     ]);
   });
 
-  test('prints every runtime skip in a stable escaped section', () {
+  test('prints every successful result category in a stable final report', () {
     final io = FakePromptIO();
     final report = ChangeReport(
       success: true,
       restored: false,
-      created: const [],
-      modified: const [],
+      created: const ['lib/new.dart'],
+      modified: const ['lib/existing.dart'],
       skipped: const [
-        'lib/existing.dart',
+        'lib/skipped.dart',
         'test/appeared\nSkipped.dart',
       ],
       output: '',
     );
 
-    ChangePlanPresenter(io: io).printReport(report);
+    ChangePlanPresenter(io: io).printReport(
+      report,
+      preserved: const [
+        PlannedPreservation(
+          subject: 'ReportModel.copyWith',
+          reason: 'Keep the existing method',
+        ),
+      ],
+    );
 
     expect(io.output, [
-      'Skipped',
+      'Final report',
+      'Created',
+      "  'lib/new.dart'",
+      'Modified',
       "  'lib/existing.dart'",
+      'Preserved',
+      "  'ReportModel.copyWith' — 'Keep the existing method'",
+      'Skipped',
+      "  'lib/skipped.dart'",
       r"  'test/appeared\nSkipped.dart'",
     ]);
   });

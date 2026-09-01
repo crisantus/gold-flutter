@@ -44,14 +44,23 @@ final class ChangePlanPresenter {
     }
   }
 
-  void printReport(ChangeReport report) {
-    if (report.skipped.isEmpty) {
-      return;
+  void printReport(
+    ChangeReport report, {
+    Iterable<PlannedPreservation> preserved = const [],
+  }) {
+    final preservedEntries = List<PlannedPreservation>.of(preserved);
+    _io.writeLine('Final report');
+    _writeReportPaths('Created', report.created);
+    _writeReportPaths('Modified', report.modified);
+    if (preservedEntries.isNotEmpty) {
+      _io.writeLine('Preserved');
+      for (final entry in preservedEntries) {
+        _io.writeLine(
+          '  ${_quoted(entry.subject)} — ${_quoted(entry.reason)}',
+        );
+      }
     }
-    _io.writeLine('Skipped');
-    for (final path in report.skipped) {
-      _io.writeLine('  ${_quoted(path)}');
-    }
+    _writeReportPaths('Skipped', report.skipped);
   }
 
   bool confirm({required bool assumeYes, required bool dryRun}) {
@@ -91,6 +100,17 @@ final class ChangePlanPresenter {
       _io.writeLine(
         '  ${_quoted(file.relativePath)} — ${_quoted(file.reason)}',
       );
+    }
+  }
+
+  void _writeReportPaths(String heading, Iterable<String> paths) {
+    final entries = List<String>.of(paths);
+    if (entries.isEmpty) {
+      return;
+    }
+    _io.writeLine(heading);
+    for (final path in entries) {
+      _io.writeLine('  ${_quoted(path)}');
     }
   }
 

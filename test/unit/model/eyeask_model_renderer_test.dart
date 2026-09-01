@@ -8,14 +8,19 @@ import 'package:gold_flutter/src/model/dart_model_parser.dart';
 import 'package:gold_flutter/src/model/eyeask_model_renderer.dart';
 import 'package:test/test.dart';
 
+import '../../support/gold_flutter_test_fixtures.dart';
+
 void main() {
   const parser = DartModelParser();
+  late GoldFlutterTestFixtures fixtures;
+
+  setUpAll(() async {
+    fixtures = await GoldFlutterTestFixtures.resolve();
+  });
 
   test('renders the approved EyeAsk model style exactly', () {
-    final inputSource =
-        File('test/fixtures/models/eyeask_input.dart').readAsStringSync();
-    final expectedSource =
-        File('test/fixtures/models/eyeask_expected.dart').readAsStringSync();
+    final inputSource = fixtures.readAsString('models/eyeask_input.dart');
+    final expectedSource = fixtures.readAsString('models/eyeask_expected.dart');
     final parsed = parser.parse(inputSource, 'eyeask_input.dart');
 
     expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
@@ -308,8 +313,7 @@ class EmptyModel {}
   ]) {
     test('preserves $fixtureName root helpers exactly without duplicates',
         () async {
-      final source =
-          File('test/fixtures/models/$fixtureName.dart').readAsStringSync();
+      final source = fixtures.readAsString('models/$fixtureName.dart');
       final parsed = parser.parse(source, '$fixtureName.dart');
 
       expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
@@ -331,8 +335,7 @@ class EmptyModel {}
   }
 
   test('preserves class list helpers before generated toJson', () {
-    final source =
-        File('test/fixtures/models/data_items_helpers.dart').readAsStringSync();
+    final source = fixtures.readAsString('models/data_items_helpers.dart');
     final parsed = parser.parse(source, 'data_items_helpers.dart');
 
     expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));

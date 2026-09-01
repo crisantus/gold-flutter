@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:args/args.dart';
 
 import '../change/change_plan_presenter.dart';
+import '../change/change_report.dart';
 import '../change/change_transaction.dart';
 import '../config/project_answers.dart';
 import '../generator/project_generator.dart';
@@ -131,18 +132,14 @@ final class GoldFlutterCli {
 
       final report = await _changeTransaction.execute(plan);
       final output = report.output.trimRight();
+      if (!report.success) {
+        _writeArrangementFailure(report, output);
+        return 1;
+      }
       if (output.isNotEmpty) {
         _io.writeLine(output);
       }
-      presenter.printReport(report);
-      if (!report.success) {
-        _io.writeLine(
-          report.restored
-              ? 'Model arrangement failed. Changes were restored.'
-              : 'Model arrangement failed.',
-        );
-        return 1;
-      }
+      presenter.printReport(report, preserved: plan.preserved);
       _io.writeLine('Model arrangement applied.');
       return 0;
     } on ModelArrangementException catch (error) {
@@ -153,8 +150,51 @@ final class GoldFlutterCli {
       return 64;
     } on Exception catch (error) {
       _io.writeLine('Model arrangement failed: $error');
+      _io.writeLine(
+        'Restoration status: not needed; the transaction did not start.',
+      );
+      _io.writeLine(
+        'Suggested next action: review the reported error and command input, '
+        'then run the command again.',
+      );
       return 1;
     }
+  }
+
+  void _writeArrangementFailure(ChangeReport report, String output) {
+    _io.writeLine('Failure details');
+    _io.writeLine(
+      output.isEmpty ? 'No tool output was captured.' : output,
+    );
+    _io.writeLine('Model arrangement failed.');
+    if (report.restored) {
+      _io.writeLine(
+        'Restoration status: completed. Changes were restored.',
+      );
+      _io.writeLine(
+        'Suggested next action: fix the reported operation or tool error, '
+        'review the plan, and run the command again.',
+      );
+      return;
+    }
+    if (report.created.isEmpty && report.modified.isEmpty) {
+      _io.writeLine(
+        'Restoration status: not needed; no planned file was written.',
+      );
+      _io.writeLine(
+        'Suggested next action: resolve the reported precondition or path '
+        'change, review the plan, and run the command again.',
+      );
+      return;
+    }
+    _io.writeLine(
+      'Restoration status: incomplete; inspect the planned files before '
+      'retrying.',
+    );
+    _io.writeLine(
+      'Suggested next action: inspect the reported files and restore any '
+      'remaining changes before running the command again.',
+    );
   }
 
   Future<int> _runDoctor() async {

@@ -1,16 +1,20 @@
-import 'dart:io';
-
 import 'package:gold_flutter/src/model/dart_model_parser.dart';
 import 'package:gold_flutter/src/model/model_field_spec.dart';
 import 'package:gold_flutter/src/model/model_top_level_function_spec.dart';
 import 'package:test/test.dart';
 
+import '../../support/gold_flutter_test_fixtures.dart';
+
 void main() {
   const parser = DartModelParser();
+  late GoldFlutterTestFixtures fixtures;
+
+  setUpAll(() async {
+    fixtures = await GoldFlutterTestFixtures.resolve();
+  });
 
   test('extracts ordered EyeAsk fields and their source JSON keys', () {
-    final source =
-        File('test/fixtures/models/eyeask_input.dart').readAsStringSync();
+    final source = fixtures.readAsString('models/eyeask_input.dart');
 
     final result =
         parser.parse(source, 'test/fixtures/models/eyeask_input.dart');
@@ -78,8 +82,7 @@ void main() {
   });
 
   test('refuses the complete file when one field shape is unsupported', () {
-    final source =
-        File('test/fixtures/models/unsupported_input.dart').readAsStringSync();
+    final source = fixtures.readAsString('models/unsupported_input.dart');
 
     final result =
         parser.parse(source, 'test/fixtures/models/unsupported_input.dart');
@@ -1217,8 +1220,7 @@ ${entry.value}
   }
 
   test('records exact supported top-level root helper roles from the AST', () {
-    final source = File('test/fixtures/models/direct_list_helpers.dart')
-        .readAsStringSync();
+    final source = fixtures.readAsString('models/direct_list_helpers.dart');
 
     final result = parser.parse(source, 'direct_list_helpers.dart');
 

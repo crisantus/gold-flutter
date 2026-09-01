@@ -32,7 +32,7 @@ Install the following first:
 
 1. [Flutter](https://docs.flutter.dev/get-started/install)
 2. Git
-3. Dart, which is included with Flutter
+3. Dart SDK `>=3.5.0 <4.0.0`, which is included with Flutter
 
 Confirm Flutter is available:
 
@@ -194,7 +194,8 @@ The command options are:
 ### Supported model shapes
 
 The arranger uses the Dart analyzer and rewrites a complete file only when all
-of it is understood. Supported fields are:
+of it is understood. The first public class is the root model; private classes
+that appear before it keep their source order. Supported fields are:
 
 - `String`, `int`, `double`, `num`, and `bool`, including nullable forms;
 - `DateTime` and `DateTime?`;
@@ -204,18 +205,24 @@ of it is understood. Supported fields are:
 - enum fields that call a preservable converter named for the field, such as
   `_statusFromJson`.
 
-Imported/external model lists and enum lists are not arranged in this release;
-they are refused because the file does not contain enough structural proof to
-regenerate them safely. Map-shaped fields, unsupported generics, non-final
-fields, invalid Dart, ambiguous constructors, and conflicting structural
-members also cause a full-file refusal with no write.
+Nested model fields and model-list elements must be declared in the same Dart
+file. Imported/external model fields, imported/external model lists, and enum
+lists are not arranged in this release because the file does not contain enough
+structural proof to regenerate them safely. Map-shaped fields, unsupported
+generics, non-final fields, invalid Dart, ambiguous constructors, and
+conflicting structural members also cause a full-file refusal with no write.
 
-Each field must map to exactly one discoverable JSON key in its `fromJson`
-argument. Snake-case, camelCase, and escaped string-literal keys are preserved.
-Missing or ambiguous mappings are refused rather than guessed. A model
-`fromJson` reads the direct map it receives. Safe top-level object/list helpers
-that unwrap direct responses, `data`, or `data.items` remain preserved; the
-arranger does not invent a response envelope.
+Snake-case, camelCase, and escaped string-literal JSON keys discovered in
+`fromJson` are preserved. When a field has no discoverable key, the arranger
+derives an acronym-aware snake-case key, such as `currentPage` to
+`current_page`, and shows that decision in the preview. Multiple conflicting
+keys for one field remain ambiguous and cause a full-file refusal.
+
+Existing direct-list, `data`, and `data.items` response handling is preserved,
+including safe local-variable and top-level-helper aliases. The arranger never
+invents an envelope. It refuses aliases that are reassigned, cyclic, ambiguous,
+or hidden inside a nested function or closure because those scopes cannot be
+rewritten safely.
 
 The canonical output orders final fields, the required constructor,
 `fromJson`, `empty`, `toJson`, an existing or requested `copyWith`, and then
@@ -265,6 +272,13 @@ otherwise-supported source without `--test` remains possible. Generated tests
 start with Gold Flutter's ownership marker. An existing test is updated only
 when that marker is its first line; an unowned test is preserved and reported.
 
+Generated tests call the root class's `fromJson` and `toJson` directly. A
+preserved top-level direct-list, `data`, or `data.items` helper is therefore
+compatible with `--test` when the root class itself accepts a direct object. If
+the root class's preserved `fromJson` factory reads an envelope, arrangement is
+still supported without `--test`, but focused test generation is refused in
+this release.
+
 Generated `copyWith` uses `argument ?? this.field`. This keeps ordinary calls
 simple but means it cannot deliberately clear a nullable field to `null` in
 this release. Existing supported `copyWith` implementations are preserved.
@@ -303,10 +317,16 @@ dart pub global deactivate gold_flutter
 ```bash
 git clone https://github.com/crisantus/gold-flutter.git
 cd gold-flutter
-dart pub get
+dart pub get --enforce-lockfile
+dart pub deps
 dart analyze
 dart test
 ```
+
+The package declares Dart 3.5 as its minimum and pins development dependencies
+that would otherwise raise the resolved SDK floor. Keep the lockfile enforced
+when checking compatibility; do not regenerate it with a newer dependency graph
+and assume the Dart 3.5 claim still holds.
 
 To smoke-test the public `main` build instead of a local checkout, activate the
 branch explicitly and inspect the nested command:
@@ -317,8 +337,11 @@ dart pub global activate --source git --git-ref main \
 gold_flutter arrange model --help
 ```
 
-Make changes on a feature branch, keep tests green, and open a pull request.
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the release workflow.
+During the current `0.2.0-dev` test-and-debug cycle, maintainers may work and
+commit directly on local `main`; a local feature branch is optional, not a
+requirement. Keep tests green and review the complete diff before any public
+push, tag, or release. External contributors may still use a branch and pull
+request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
 
 ## Security
 

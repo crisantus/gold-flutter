@@ -26,7 +26,7 @@ release, and offline-mode behavior is intentionally deferred.
   when an operation or its required verification fails.
 - Keep terminal output conversational, explicit, and usable interactively or
   non-interactively.
-- Document stable installation, development-branch testing, and every new
+- Document stable installation, current-main pre-release testing, and every new
   command for open-source users.
 
 ## Non-goals
@@ -202,8 +202,10 @@ structural members. It may replace constructors, `empty`, `fromJson`,
 `toJson`, recognized list helpers, and `copyWith` only when the change plan
 names them explicitly.
 
-The command refuses the entire file without writing when it encounters an
-unsupported field type, ambiguous JSON mapping, syntactically invalid source,
+The command preserves safe local aliases through direct, `data`, and
+`data.items` payloads. It refuses the entire file without writing when it
+encounters an unsupported or imported/external model boundary, ambiguous JSON
+mapping, nested function/closure alias scope, syntactically invalid source,
 conflicting class declarations, or a custom structural method it cannot
 preserve safely. The terminal identifies the unsupported declaration.
 
@@ -213,8 +215,10 @@ After writing, the command runs Dart formatting and analysis for the project.
 When `--test` is supplied, it creates a focused test when the target does not
 exist. An existing test is updated only when its ownership marker identifies it
 as Gold Flutter generated; otherwise it is preserved and reported. The focused
-test runs after generation. A failure restores the original model and test
-files.
+test calls the first public root class's direct-object `fromJson` and `toJson`.
+Preserved top-level list/envelope helpers remain compatible, but a preserved
+root factory that itself reads an envelope refuses `--test`. The focused test
+runs after generation. A failure restores the original model and test files.
 
 ## `optimize`
 
@@ -313,8 +317,8 @@ update owned sections without overwriting user-authored documentation.
 The repository's own README and command documentation will also explain:
 
 - stable public installation;
-- feature-branch installation with `--git-ref`;
-- returning from a development branch to stable `main`;
+- explicit `main` installation with `--git-ref main`;
+- local-main pre-release testing and optional contributor branches;
 - all new commands and flags;
 - previews, confirmation, rollback, limitations, and failure recovery;
 - contribution and release workflow.
@@ -342,18 +346,18 @@ tests must pass.
 
 ## Release workflow
 
-Development occurs on `feat/developer-assistant` with version `0.2.0-dev`.
-Documentation includes this branch-install command:
+Development and debugging occur on local `main` with version `0.2.0-dev`.
+Documentation includes this explicit main-install command:
 
 ```bash
 dart pub global activate \
   --source git \
-  --git-ref feat/developer-assistant \
+  --git-ref main \
   https://github.com/crisantus/gold-flutter.git
 ```
 
-After local verification, independent review, branch installation, and GitHub
-Actions pass, the branch is merged into `main`. The exact public installation
-command is tested again from `main`, then release tag `0.2.0` is created. The
-merged local feature branch is deleted after explicit approval. Public `main`
-remains installable throughout development.
+No push, tag, or release occurs without explicit approval. After local
+verification and independent review, `main` is pushed, GitHub Actions must pass,
+and the exact public installation command is tested. Release tag `0.2.0` is
+created only after separate approval. External contributors may still use
+short-lived branches and pull requests.

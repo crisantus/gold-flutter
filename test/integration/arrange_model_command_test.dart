@@ -61,6 +61,11 @@ void main() {
       'flutter analyze',
       'flutter test test/domain/models/report_model_test.dart',
     ]);
+    final finalReport = io.output.join('\n').split('Final report').last;
+    expect(finalReport, contains('Created'));
+    expect(finalReport, contains('test/domain/models/report_model_test.dart'));
+    expect(finalReport, contains('Modified'));
+    expect(finalReport, contains('lib/domain/models/report_model.dart'));
   });
 }
 
