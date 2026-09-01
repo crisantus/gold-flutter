@@ -185,6 +185,30 @@ void main() {
     );
   });
 
+  test('docs help and dry-run are non-mutating', () async {
+    final helpIO = FakePromptIO([]);
+    expect(await GoldFlutterCli(io: helpIO).run(['docs', '--help']), 0);
+    expect(helpIO.output.join('\n'), contains('--dry-run'));
+    expect(helpIO.output.join('\n'), contains('--yes'));
+
+    final fixture = await ProjectFixture.create(files: {
+      'lib/main.dart': 'void main() {}\n',
+    });
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor(const {});
+    final dryRunIO = FakePromptIO([]);
+    final exitCode = await GoldFlutterCli(
+      io: dryRunIO,
+      currentDirectory: fixture.root,
+      changeTransaction: ChangeTransaction(executor: executor),
+    ).run(['docs', '--dry-run']);
+
+    expect(exitCode, 0);
+    expect(executor.calls, isEmpty);
+    expect(await fixture.file('docs/gold_flutter/README.md').exists(), isFalse);
+    expect(dryRunIO.output.join('\n'), contains('No files have been changed.'));
+  });
+
   test('arrange model without --path returns usage exit code 64', () async {
     final io = FakePromptIO([]);
 

@@ -9,6 +9,7 @@ import '../change/change_plan_presenter.dart';
 import '../change/change_report.dart';
 import '../change/change_transaction.dart';
 import '../config/project_answers.dart';
+import '../docs/documentation_generator.dart';
 import '../generator/project_generator.dart';
 import '../model/model_arranger.dart';
 import '../optimize/project_auditor.dart';
@@ -64,6 +65,13 @@ final class GoldFlutterCli {
       return 0;
     }
     if (arguments.isNotEmpty &&
+        arguments.first == 'docs' &&
+        arguments.any((argument) => argument == '--help' || argument == '-h')) {
+      _io.writeLine('Usage: gold_flutter docs [options]');
+      _io.writeLine(parser.commands['docs']!.usage);
+      return 0;
+    }
+    if (arguments.isNotEmpty &&
         arguments.first == 'optimize' &&
         arguments.any((argument) => argument == '--help' || argument == '-h')) {
       _io.writeLine('Usage: gold_flutter optimize [options]');
@@ -115,9 +123,53 @@ final class GoldFlutterCli {
         return _runOptimize(command);
       case 'add':
         return _runAdd(command);
+      case 'docs':
+        return _runDocs(command);
       default:
         _io.writeLine('Unknown command: ${command.name}');
         return 64;
+    }
+  }
+
+  Future<int> _runDocs(ArgResults command) async {
+    try {
+      final project = await const ProjectInspector().inspect(_currentDirectory);
+      if (project.isDirty) {
+        _io.writeLine('Warning: the project has uncommitted Git changes.');
+      }
+      final plan = await const DocumentationGenerator().plan(project);
+      final presenter = ChangePlanPresenter(io: _io)..print(plan);
+      final apply = presenter.confirm(
+        assumeYes: command['yes'] as bool,
+        dryRun: command['dry-run'] as bool,
+      );
+      if (!apply) return 0;
+
+      final report = await _changeTransaction.execute(plan);
+      final output = report.output.trimRight();
+      if (output.isNotEmpty) _io.writeLine(output);
+      if (!report.success) {
+        _io.writeLine('Documentation generation failed.');
+        _io.writeLine(
+          report.restored
+              ? 'Restoration status: completed. Changes were restored.'
+              : 'Restoration status: incomplete or not required; inspect '
+                  'docs/gold_flutter before retrying.',
+        );
+        return 1;
+      }
+      presenter.printReport(report, preserved: plan.preserved);
+      _io.writeLine('Project documentation generated.');
+      return 0;
+    } on ProjectInspectionException catch (error) {
+      _io.writeLine(error.message);
+      return 64;
+    } on FormatException catch (error) {
+      _io.writeLine(error.message);
+      return 1;
+    } on Exception catch (error) {
+      _io.writeLine('Documentation generation failed: $error');
+      return 1;
     }
   }
 
@@ -537,6 +589,18 @@ final class GoldFlutterCli {
         negatable: false,
         help: 'Use flag values and apply without confirmation.',
       );
+    parser.addCommand('docs')
+      ..addFlag(
+        'dry-run',
+        negatable: false,
+        help: 'Preview generated documentation without writing it.',
+      )
+      ..addFlag(
+        'yes',
+        abbr: 'y',
+        negatable: false,
+        help: 'Generate documentation without confirmation.',
+      );
     parser.addCommand('arrange').addCommand('model')
       ..addOption(
         'path',
@@ -572,7 +636,7 @@ final class GoldFlutterCli {
     _io.writeLine('Create a Riverpod + AutoRoute Flutter project.');
     _io.writeLine('');
     _io.writeLine(
-      'Usage: gold_flutter <create|doctor|arrange|optimize|add> [options]',
+      'Usage: gold_flutter <create|doctor|arrange|optimize|add|docs> [options]',
     );
     _io.writeLine(parser.usage);
   }
