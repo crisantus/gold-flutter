@@ -47,9 +47,11 @@ final class _RecordingProcessExecutor implements ProcessExecutor {
     String executable,
     List<String> arguments, {
     required Directory workingDirectory,
+    void Function()? onStarted,
   }) async {
     this.executable = executable;
     this.arguments = arguments;
+    onStarted?.call();
     return const ProcessOutput(exitCode: 0, stdout: '', stderr: '');
   }
 }

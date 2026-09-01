@@ -75,15 +75,19 @@ final class ChangeTransaction {
 
       for (var index = 0; index < plan.commands.length; index++) {
         final command = plan.commands[index];
+        void Function()? onStarted;
         if (commandEffects[index] == _CommandEffect.mutating &&
             !mutatingCommandStarted) {
           await _validatePostWriteState(plan, writtenFiles);
-          mutatingCommandStarted = true;
+          onStarted = () {
+            mutatingCommandStarted = true;
+          };
         }
         final result = await executor.run(
           command.executable,
           command.arguments,
           workingDirectory: plan.projectRoot,
+          onStarted: onStarted,
         );
         _appendOutput(output, result.stdout);
         _appendOutput(output, result.stderr);
@@ -114,14 +118,13 @@ final class ChangeTransaction {
                         writtenFiles.containsKey(snapshot.relativePath),
                   )
                   .toList();
-          await _restore(
+          restored = await _restore(
             plan.projectRoot.path,
             snapshotDirectory!,
             rollbackSnapshots,
             createdParentDirectories,
             expectedOwnedContents: mutatingCommandStarted ? null : writtenFiles,
           );
-          restored = true;
         } catch (error) {
           _appendDiagnostic(output, error.toString());
         }
@@ -203,7 +206,7 @@ final class ChangeTransaction {
     }
   }
 
-  Future<void> _restore(
+  Future<bool> _restore(
     String projectRoot,
     String snapshotDirectory,
     List<_Snapshot> snapshots,
@@ -211,6 +214,7 @@ final class ChangeTransaction {
     required Map<String, List<int>>? expectedOwnedContents,
   }) async {
     final failures = <Object>[];
+    var restored = false;
     for (final snapshot in snapshots.where((entry) => entry.isRoot)) {
       try {
         var original = await _rejectProjectPath(
@@ -225,6 +229,7 @@ final class ChangeTransaction {
             recursive: true,
           );
           await fileSystem.delete(original);
+          restored = true;
         }
         if (snapshot.existed) {
           final backup = _resolveContainedPath(
@@ -237,6 +242,7 @@ final class ChangeTransaction {
             recursive: true,
           );
           await fileSystem.copyTree(backup, original);
+          restored = true;
         }
       } catch (error) {
         failures.add(error);
@@ -265,13 +271,23 @@ final class ChangeTransaction {
             projectRoot,
             snapshot.relativePath,
           );
+          if (expectedOwnedContent != null &&
+              !await _matchesBytes(original, expectedOwnedContent)) {
+            continue;
+          }
           await fileSystem.writeBytes(original, bytes);
+          restored = true;
         } else if (await fileSystem.exists(original)) {
           original = await _rejectProjectPath(
             projectRoot,
             snapshot.relativePath,
           );
+          if (expectedOwnedContent != null &&
+              !await _matchesBytes(original, expectedOwnedContent)) {
+            continue;
+          }
           await fileSystem.delete(original);
+          restored = true;
         }
       } catch (error) {
         failures.add(error);
@@ -286,7 +302,9 @@ final class ChangeTransaction {
           projectRoot,
           parent,
         );
-        await fileSystem.deleteEmptyDirectory(parentPath);
+        if (await fileSystem.deleteEmptyDirectory(parentPath)) {
+          restored = true;
+        }
       } catch (error) {
         failures.add(error);
       }
@@ -294,6 +312,7 @@ final class ChangeTransaction {
     if (failures.isNotEmpty) {
       throw _RestorationFailure(failures);
     }
+    return restored;
   }
 
   static void _appendOutput(List<String> output, String value) {

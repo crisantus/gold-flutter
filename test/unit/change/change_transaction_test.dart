@@ -1172,6 +1172,223 @@ void main() {
     expect(target.readAsStringSync(), 'concurrent after transaction write');
   });
 
+  test('preserves a concurrent modify change made during selective restore',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/existing.dart': 'previewed'},
+    );
+    addTearDown(fixture.dispose);
+    final target = fixture.file('lib/existing.dart');
+    final concurrentBytes = [
+      ..._utf8Bom,
+      ...utf8.encode('concurrent during restore'),
+    ];
+    String? snapshotDirectory;
+    final fileSystem = _PhaseRaceFileSystem(
+      onTemporaryDirectoryCreated: (path) async {
+        snapshotDirectory = path;
+      },
+      onAfterRead: (path, _) async {
+        final snapshot = snapshotDirectory;
+        if (snapshot != null &&
+            path == '$snapshot${Platform.pathSeparator}file_0') {
+          await target.writeAsBytes(concurrentBytes);
+        }
+      },
+    );
+    final executor = FakeProcessExecutor({
+      'flutter analyze': const ProcessOutput(
+        exitCode: 1,
+        stdout: '',
+        stderr: 'analysis failed',
+      ),
+    });
+    final plan = ChangePlan(
+      summary: 'guard selective modify restore race',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'generated',
+          kind: FileChangeKind.modify,
+          reason: 'modify existing',
+          precondition: TextFilePrecondition.exact('previewed'),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['analyze'],
+          reason: 'force rollback',
+          mutatesFiles: false,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: executor,
+      fileSystem: fileSystem,
+    ).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(await target.readAsBytes(), concurrentBytes);
+  });
+
+  test('preserves a concurrent create change made during selective restore',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/keep.txt': 'keep'},
+    );
+    addTearDown(fixture.dispose);
+    final target = fixture.file('lib/created.dart');
+    final concurrentBytes = utf8.encode('concurrent during restore');
+    var rollbackArmed = false;
+    var rollbackLinkChecks = 0;
+    final fileSystem = _PhaseRaceFileSystem(
+      onIsLinkObserved: (path, _, __) async {
+        if (rollbackArmed && path == target.path) {
+          rollbackLinkChecks++;
+          if (rollbackLinkChecks == 2) {
+            await target.writeAsBytes(concurrentBytes);
+          }
+        }
+      },
+    );
+    final executor = _CallbackProcessExecutor((_) async {
+      rollbackArmed = true;
+      return const ProcessOutput(
+        exitCode: 1,
+        stdout: '',
+        stderr: 'analysis failed',
+      );
+    });
+    final plan = ChangePlan(
+      summary: 'guard selective create restore race',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/created.dart',
+          content: 'generated',
+          kind: FileChangeKind.create,
+          reason: 'create file',
+          precondition: TextFilePrecondition.absent(),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['analyze'],
+          reason: 'force rollback',
+          mutatesFiles: false,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: executor,
+      fileSystem: fileSystem,
+    ).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(await target.readAsBytes(), concurrentBytes);
+  });
+
+  test('keeps selective rollback when a mutating command fails pre-spawn',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/existing.dart': 'previewed'},
+    );
+    addTearDown(fixture.dispose);
+    final target = fixture.file('lib/existing.dart');
+    final concurrentBytes = utf8.encode('concurrent before spawn');
+    final executor = _PreSpawnFailingExecutor(target, concurrentBytes);
+    final plan = ChangePlan(
+      summary: 'guard pre-spawn failure',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/existing.dart',
+          content: 'generated',
+          kind: FileChangeKind.modify,
+          reason: 'modify existing',
+          precondition: TextFilePrecondition.exact('previewed'),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'dart',
+          arguments: const ['format', 'lib/existing.dart'],
+          reason: 'format file',
+          mutatesFiles: true,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(executor: executor).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(executor.calls, 1);
+    expect(report.output, contains('spawn failed'));
+    expect(await target.readAsBytes(), concurrentBytes);
+  });
+
+  test('reports an actual empty-parent cleanup failure as not restored',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/keep.txt': 'keep'},
+    );
+    addTearDown(fixture.dispose);
+    final failingParent = fixture.file('lib/generated').path;
+    final fileSystem = _PhaseRaceFileSystem(
+      onDeleteEmptyDirectory: (path) async {
+        if (path == failingParent) {
+          throw FileSystemException('permission denied', path);
+        }
+      },
+    );
+    final executor = FakeProcessExecutor({
+      'flutter analyze': const ProcessOutput(
+        exitCode: 1,
+        stdout: '',
+        stderr: 'analysis failed',
+      ),
+    });
+    final plan = ChangePlan(
+      summary: 'propagate parent cleanup failure',
+      projectRoot: fixture.root,
+      files: const [
+        PlannedFileChange(
+          relativePath: 'lib/generated/created.dart',
+          content: 'generated',
+          kind: FileChangeKind.create,
+          reason: 'create nested file',
+          precondition: TextFilePrecondition.absent(),
+        ),
+      ],
+      commands: [
+        PlannedCommand(
+          executable: 'flutter',
+          arguments: const ['analyze'],
+          reason: 'force rollback',
+          mutatesFiles: false,
+        ),
+      ],
+    );
+
+    final report = await ChangeTransaction(
+      executor: executor,
+      fileSystem: fileSystem,
+    ).execute(plan);
+
+    expect(report.success, isFalse);
+    expect(report.restored, isFalse);
+    expect(report.output, contains('permission denied'));
+    expect(fixture.file('lib/generated/created.dart').existsSync(), isFalse);
+  });
+
   test('creates and modifies files and reports successful commands', () async {
     final fixture = await ProjectFixture.create(
       files: {'lib/existing.dart': 'old'},
@@ -1597,8 +1814,31 @@ final class _CallbackProcessExecutor implements ProcessExecutor {
     String executable,
     List<String> arguments, {
     required Directory workingDirectory,
-  }) =>
-      callback(workingDirectory);
+    void Function()? onStarted,
+  }) {
+    onStarted?.call();
+    return callback(workingDirectory);
+  }
+}
+
+final class _PreSpawnFailingExecutor implements ProcessExecutor {
+  _PreSpawnFailingExecutor(this.target, this.concurrentBytes);
+
+  final File target;
+  final List<int> concurrentBytes;
+  var calls = 0;
+
+  @override
+  Future<ProcessOutput> run(
+    String executable,
+    List<String> arguments, {
+    required Directory workingDirectory,
+    void Function()? onStarted,
+  }) async {
+    calls++;
+    await target.writeAsBytes(concurrentBytes);
+    throw ProcessException(executable, arguments, 'spawn failed');
+  }
 }
 
 final class _FailingRestoreFileSystem implements ProjectFileSystem {
@@ -1705,19 +1945,33 @@ typedef _ExistsObservedCallback = Future<void> Function(
   bool exists,
 );
 typedef _WriteCallback = Future<void> Function(String path);
+typedef _ReadCallback = Future<void> Function(String path, List<int> bytes);
+typedef _IsLinkObservedCallback = Future<void> Function(
+  String path,
+  int observation,
+  bool isLink,
+);
+typedef _DeleteEmptyDirectoryCallback = Future<void> Function(String path);
 
 final class _PhaseRaceFileSystem implements ProjectFileSystem {
   _PhaseRaceFileSystem({
     this.onTemporaryDirectoryCreated,
     this.onExistsObserved,
     this.onAfterWrite,
+    this.onAfterRead,
+    this.onIsLinkObserved,
+    this.onDeleteEmptyDirectory,
   });
 
   final _TemporaryDirectoryCallback? onTemporaryDirectoryCreated;
   final _ExistsObservedCallback? onExistsObserved;
   final _WriteCallback? onAfterWrite;
+  final _ReadCallback? onAfterRead;
+  final _IsLinkObservedCallback? onIsLinkObserved;
+  final _DeleteEmptyDirectoryCallback? onDeleteEmptyDirectory;
   final ProjectFileSystem _delegate = const LocalProjectFileSystem();
   final Map<String, int> _existenceObservations = {};
+  final Map<String, int> _linkObservations = {};
 
   @override
   Future<String> createTemporaryDirectory(String prefix) async {
@@ -1737,8 +1991,10 @@ final class _PhaseRaceFileSystem implements ProjectFileSystem {
   Future<void> delete(String path) => _delegate.delete(path);
 
   @override
-  Future<bool> deleteEmptyDirectory(String path) =>
-      _delegate.deleteEmptyDirectory(path);
+  Future<bool> deleteEmptyDirectory(String path) async {
+    await onDeleteEmptyDirectory?.call(path);
+    return _delegate.deleteEmptyDirectory(path);
+  }
 
   @override
   Future<bool> exists(String path) async {
@@ -1750,10 +2006,20 @@ final class _PhaseRaceFileSystem implements ProjectFileSystem {
   }
 
   @override
-  Future<bool> isLink(String path) => _delegate.isLink(path);
+  Future<bool> isLink(String path) async {
+    final result = await _delegate.isLink(path);
+    final observation = (_linkObservations[path] ?? 0) + 1;
+    _linkObservations[path] = observation;
+    await onIsLinkObserved?.call(path, observation, result);
+    return result;
+  }
 
   @override
-  Future<List<int>> readBytes(String path) => _delegate.readBytes(path);
+  Future<List<int>> readBytes(String path) async {
+    final bytes = await _delegate.readBytes(path);
+    await onAfterRead?.call(path, bytes);
+    return bytes;
+  }
 
   @override
   Future<void> writeBytes(String path, List<int> bytes) async {

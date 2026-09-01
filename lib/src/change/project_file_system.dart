@@ -97,7 +97,14 @@ final class LocalProjectFileSystem implements ProjectFileSystem {
       await Directory(path).delete();
       return true;
     } on FileSystemException {
-      return false;
+      final currentType = await FileSystemEntity.type(path, followLinks: false);
+      if (currentType != FileSystemEntityType.directory) {
+        return false;
+      }
+      await for (final _ in Directory(path).list(followLinks: false)) {
+        return false;
+      }
+      rethrow;
     }
   }
 

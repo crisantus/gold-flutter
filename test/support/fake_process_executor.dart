@@ -24,9 +24,11 @@ final class FakeProcessExecutor implements ProcessExecutor {
     String executable,
     List<String> arguments, {
     required Directory workingDirectory,
+    void Function()? onStarted,
   }) async {
     final command = [executable, ...arguments].join(' ');
     calls.add(command);
+    onStarted?.call();
     return outputs[command] ??
         const ProcessOutput(
           exitCode: 127,

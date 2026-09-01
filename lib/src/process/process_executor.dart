@@ -13,10 +13,14 @@ final class ProcessOutput {
 }
 
 abstract interface class ProcessExecutor {
+  /// Calls [onStarted] exactly once after the subprocess has started.
+  ///
+  /// Implementations must not call it when process spawning fails.
   Future<ProcessOutput> run(
     String executable,
     List<String> arguments, {
     required Directory workingDirectory,
+    void Function()? onStarted,
   });
 }
 
@@ -28,17 +32,22 @@ final class LocalProcessExecutor implements ProcessExecutor {
     String executable,
     List<String> arguments, {
     required Directory workingDirectory,
+    void Function()? onStarted,
   }) async {
-    final result = await Process.run(
+    final process = await Process.start(
       executable,
       arguments,
       workingDirectory: workingDirectory.path,
       runInShell: Platform.isWindows,
     );
+    onStarted?.call();
+    final stdout = process.stdout.transform(systemEncoding.decoder).join();
+    final stderr = process.stderr.transform(systemEncoding.decoder).join();
+    final exitCode = await process.exitCode;
     return ProcessOutput(
-      exitCode: result.exitCode,
-      stdout: result.stdout.toString(),
-      stderr: result.stderr.toString(),
+      exitCode: exitCode,
+      stdout: await stdout,
+      stderr: await stderr,
     );
   }
 }

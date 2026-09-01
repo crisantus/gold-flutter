@@ -30,7 +30,9 @@ final class _FailingExecutor implements ProcessExecutor {
     String executable,
     List<String> arguments, {
     required Directory workingDirectory,
+    void Function()? onStarted,
   }) async {
+    onStarted?.call();
     return const ProcessOutput(
       exitCode: 1,
       stdout: 'detail line',

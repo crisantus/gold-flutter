@@ -210,6 +210,7 @@ final class _ThrowingProcessExecutor implements ProcessExecutor {
     String executable,
     List<String> arguments, {
     required Directory workingDirectory,
+    void Function()? onStarted,
   }) {
     throw StateError('Git is unavailable');
   }
