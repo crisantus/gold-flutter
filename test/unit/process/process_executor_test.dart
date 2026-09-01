@@ -22,4 +22,41 @@ void main() {
     expect(result.stdout.trim(), 'gold');
     expect(result.stderr, isEmpty);
   });
+
+  test(
+    'local executor closes child stdin so an EOF reader completes',
+    () async {
+      final root = await Directory.systemTemp.createTemp('gold_process_eof_');
+      addTearDown(() => root.delete(recursive: true));
+      final child = File('${root.path}${Platform.pathSeparator}child.dart');
+      await child.writeAsString('''
+import 'dart:io';
+
+Future<void> main() async {
+  await stdin.drain<void>();
+  stdout.write('stdout after eof');
+  stderr.write('stderr after eof');
+  await stdout.flush();
+  await stderr.flush();
+  exitCode = 23;
+}
+''');
+      var started = false;
+
+      final result = await const LocalProcessExecutor().run(
+        Platform.resolvedExecutable,
+        [child.path],
+        workingDirectory: root,
+        onStarted: () {
+          started = true;
+        },
+      ).timeout(const Duration(seconds: 5));
+
+      expect(started, isTrue);
+      expect(result.exitCode, 23);
+      expect(result.stdout, 'stdout after eof');
+      expect(result.stderr, 'stderr after eof');
+    },
+    timeout: const Timeout(Duration(seconds: 10)),
+  );
 }

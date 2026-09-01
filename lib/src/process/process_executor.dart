@@ -41,8 +41,10 @@ final class LocalProcessExecutor implements ProcessExecutor {
       runInShell: Platform.isWindows,
     );
     onStarted?.call();
+    final stdinClosed = process.stdin.close();
     final stdout = process.stdout.transform(systemEncoding.decoder).join();
     final stderr = process.stderr.transform(systemEncoding.decoder).join();
+    await stdinClosed;
     final exitCode = await process.exitCode;
     return ProcessOutput(
       exitCode: exitCode,
