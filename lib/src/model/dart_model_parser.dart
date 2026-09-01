@@ -338,7 +338,7 @@ final class DartModelParser {
     var preserveFromJson = false;
     var supportsDirectObjectFromJson = true;
     if (fields.isNotEmpty) {
-      final aliases = _jsonAliases(fromJson!.body);
+      final aliases = _JsonAliasAnalysis.fromBody(fromJson!.body);
       final arguments = _returnedClassArguments(
         fromJson.body,
         className,
@@ -375,6 +375,14 @@ final class DartModelParser {
         }
         final expression = matchingArguments.single.expression;
         final access = _jsonAccess(expression, aliases);
+        if (access.unresolvedAliases.isNotEmpty) {
+          diagnostics.add(
+            'Unable to safely resolve JSON alias '
+            '${access.unresolvedAliases.join(', ')} for '
+            '$className.${field.name} in $path.',
+          );
+          continue;
+        }
         final keys = access.paths.map((path) => path.last).toSet();
         if (keys.length > 1) {
           diagnostics.add(
@@ -800,13 +808,14 @@ ArgumentList? _returnedClassArguments(
 
 _JsonAccess _jsonAccess(
   Expression expression,
-  Map<String, List<List<String>>> aliases,
+  _JsonAliasAnalysis aliases,
 ) {
   final visitor = _JsonAccessVisitor(aliases);
   expression.accept(visitor);
   return _JsonAccess(
     paths: visitor.paths,
     usesAlias: visitor.usesAlias,
+    unresolvedAliases: visitor.unresolvedAliases,
   );
 }
 
@@ -847,35 +856,80 @@ final class _FieldShape {
 }
 
 final class _JsonAccess {
-  const _JsonAccess({required this.paths, required this.usesAlias});
+  const _JsonAccess({
+    required this.paths,
+    required this.usesAlias,
+    required this.unresolvedAliases,
+  });
 
   final List<List<String>> paths;
   final bool usesAlias;
+  final Set<String> unresolvedAliases;
 }
 
 final class _JsonAccessVisitor extends RecursiveAstVisitor<void> {
   _JsonAccessVisitor(this.aliases);
 
-  final Map<String, List<List<String>>> aliases;
+  final _JsonAliasAnalysis aliases;
   final List<List<String>> paths = [];
+  final Set<String> unresolvedAliases = {};
   var usesAlias = false;
 
   @override
   void visitIndexExpression(IndexExpression node) {
     final index = node.index;
     if (!_isIntermediateIndexReceiver(node) && index is SimpleStringLiteral) {
-      final targetPaths = _jsonTargetPaths(node.realTarget, aliases);
+      final localTargets = _referencedIdentifiers(
+        node.realTarget,
+        aliases.localNames,
+      );
+      final targetPaths = _jsonTargetPaths(
+        node.realTarget,
+        aliases.resolved,
+      );
       for (final path in targetPaths) {
-        final complete = [...path, index.value];
-        if (!paths.any((candidate) => _samePath(candidate, complete))) {
-          paths.add(complete);
-        }
+        _addPath([...path, index.value]);
       }
-      if (_referencesAnyIdentifier(node.realTarget, aliases.keys)) {
+      if (localTargets.isNotEmpty) {
         usesAlias = true;
       }
+      if (targetPaths.isEmpty && localTargets.isNotEmpty) {
+        unresolvedAliases.addAll(localTargets);
+      }
+      unresolvedAliases.addAll(
+        localTargets.where((name) => aliases.unsafe.contains(name)),
+      );
+      return;
     }
     super.visitIndexExpression(node);
+  }
+
+  @override
+  void visitSimpleIdentifier(SimpleIdentifier node) {
+    final name = node.name;
+    if (!aliases.localNames.contains(name)) {
+      super.visitSimpleIdentifier(node);
+      return;
+    }
+    usesAlias = true;
+    final aliasPaths = aliases.resolved[name];
+    if (aliasPaths == null || aliases.unsafe.contains(name)) {
+      unresolvedAliases.add(name);
+      return;
+    }
+    for (final path in aliasPaths) {
+      if (path.isEmpty || path.last == _opaqueJsonAliasSegment) {
+        unresolvedAliases.add(name);
+      } else {
+        _addPath(path);
+      }
+    }
+  }
+
+  void _addPath(List<String> path) {
+    if (!paths.any((candidate) => _samePath(candidate, path))) {
+      paths.add(path);
+    }
   }
 }
 
@@ -958,37 +1012,172 @@ List<List<String>> _jsonTargetPaths(
   return const [];
 }
 
-Map<String, List<List<String>>> _jsonAliases(FunctionBody body) {
-  if (body is! BlockFunctionBody) {
-    return const {};
-  }
-  final aliases = <String, List<List<String>>>{};
-  for (final statement in body.block.statements) {
-    if (statement is! VariableDeclarationStatement) {
-      continue;
+final class _JsonAliasAnalysis {
+  _JsonAliasAnalysis._({
+    required this.localNames,
+    required Map<String, List<VariableDeclaration>> declarations,
+    required Set<String> writtenNames,
+  })  : _declarations = declarations,
+        _writtenNames = writtenNames;
+
+  factory _JsonAliasAnalysis.fromBody(FunctionBody body) {
+    if (body is! BlockFunctionBody) {
+      return _JsonAliasAnalysis._(
+        localNames: const {},
+        declarations: const {},
+        writtenNames: const {},
+      );
     }
-    for (final variable in statement.variables.variables) {
-      final initializer = variable.initializer;
-      if (initializer == null) {
-        continue;
-      }
-      var paths = _jsonTargetPaths(initializer, aliases);
-      if (paths.isEmpty &&
-          _referencesAnyIdentifier(
-            initializer,
-            {'json', ...aliases.keys},
-          )) {
-        paths = const [
-          [_opaqueJsonAliasSegment],
-        ];
-      }
-      if (paths.isNotEmpty) {
-        aliases[variable.name.lexeme] = paths;
-      }
+    final declarations = _LocalDeclarationVisitor();
+    body.block.accept(declarations);
+    final localNames = declarations.variables.keys.toSet();
+    final writes = _LocalWriteVisitor(localNames);
+    body.block.accept(writes);
+    final analysis = _JsonAliasAnalysis._(
+      localNames: localNames,
+      declarations: declarations.variables,
+      writtenNames: writes.names,
+    );
+    for (final name in localNames) {
+      analysis._resolve(name, <String>{});
+    }
+    return analysis;
+  }
+
+  final Set<String> localNames;
+  final Map<String, List<VariableDeclaration>> _declarations;
+  final Set<String> _writtenNames;
+  final Map<String, List<List<String>>> resolved = {};
+  final Set<String> unsafe = {};
+
+  void _resolve(String name, Set<String> visiting) {
+    if (resolved.containsKey(name) || unsafe.contains(name)) {
+      return;
+    }
+    final declarations = _declarations[name] ?? const [];
+    if (declarations.length != 1 || _writtenNames.contains(name)) {
+      unsafe.add(name);
+      return;
+    }
+    final initializer = declarations.single.initializer;
+    if (initializer == null || !visiting.add(name)) {
+      unsafe.add(name);
+      return;
+    }
+
+    final dependencies = _referencedIdentifiers(initializer, localNames);
+    for (final dependency in dependencies) {
+      _resolve(dependency, visiting);
+    }
+    visiting.remove(name);
+    if (dependencies.any(unsafe.contains)) {
+      unsafe.add(name);
+      return;
+    }
+
+    var paths = _jsonTargetPaths(initializer, resolved);
+    if (paths.isEmpty &&
+        (_referencesAnyIdentifier(initializer, const {'json'}) ||
+            dependencies.any(resolved.containsKey))) {
+      paths = const [
+        [_opaqueJsonAliasSegment],
+      ];
+    }
+    if (paths.isEmpty) {
+      unsafe.add(name);
+    } else {
+      resolved[name] = paths;
     }
   }
-  return aliases;
 }
+
+final class _LocalDeclarationVisitor extends RecursiveAstVisitor<void> {
+  final Map<String, List<VariableDeclaration>> variables = {};
+
+  @override
+  void visitFunctionExpression(FunctionExpression node) {}
+
+  @override
+  void visitVariableDeclaration(VariableDeclaration node) {
+    variables.putIfAbsent(node.name.lexeme, () => []).add(node);
+    super.visitVariableDeclaration(node);
+  }
+}
+
+final class _LocalWriteVisitor extends RecursiveAstVisitor<void> {
+  _LocalWriteVisitor(this.localNames);
+
+  final Set<String> localNames;
+  final Set<String> names = {};
+
+  @override
+  void visitFunctionExpression(FunctionExpression node) {}
+
+  @override
+  void visitAssignmentExpression(AssignmentExpression node) {
+    names.addAll(_referencedIdentifiers(node.leftHandSide, localNames));
+    super.visitAssignmentExpression(node);
+  }
+
+  @override
+  void visitPrefixExpression(PrefixExpression node) {
+    if (node.operator.lexeme == '++' || node.operator.lexeme == '--') {
+      names.addAll(_referencedIdentifiers(node.operand, localNames));
+    }
+    super.visitPrefixExpression(node);
+  }
+
+  @override
+  void visitPostfixExpression(PostfixExpression node) {
+    if (node.operator.lexeme == '++' || node.operator.lexeme == '--') {
+      names.addAll(_referencedIdentifiers(node.operand, localNames));
+    }
+    super.visitPostfixExpression(node);
+  }
+
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    final target = node.target;
+    if (_mutatingMethodNames.contains(node.methodName.name) && target != null) {
+      names.addAll(_referencedIdentifiers(target, localNames));
+    }
+    super.visitMethodInvocation(node);
+  }
+
+  @override
+  void visitCascadeExpression(CascadeExpression node) {
+    final mutates = node.cascadeSections.whereType<MethodInvocation>().any(
+          (section) => _mutatingMethodNames.contains(section.methodName.name),
+        );
+    if (mutates) {
+      names.addAll(_referencedIdentifiers(node.target, localNames));
+    }
+    super.visitCascadeExpression(node);
+  }
+}
+
+const _mutatingMethodNames = {
+  'add',
+  'addAll',
+  'clear',
+  'fillRange',
+  'insert',
+  'insertAll',
+  'putIfAbsent',
+  'remove',
+  'removeAt',
+  'removeLast',
+  'removeRange',
+  'removeWhere',
+  'replaceRange',
+  'retainWhere',
+  'setAll',
+  'setRange',
+  'shuffle',
+  'sort',
+  'update',
+  'updateAll',
+};
 
 const _opaqueJsonAliasSegment = '\u0000gold_flutter_opaque_json_alias';
 
@@ -1023,6 +1212,15 @@ bool _referencesAnyIdentifier(
   return visitor.found;
 }
 
+Set<String> _referencedIdentifiers(
+  AstNode node,
+  Set<String> identifiers,
+) {
+  final visitor = _IdentifierSetVisitor(identifiers);
+  node.accept(visitor);
+  return visitor.found;
+}
+
 final class _IdentifierVisitor extends RecursiveAstVisitor<void> {
   _IdentifierVisitor(this.identifiers);
 
@@ -1033,6 +1231,24 @@ final class _IdentifierVisitor extends RecursiveAstVisitor<void> {
   void visitSimpleIdentifier(SimpleIdentifier node) {
     if (identifiers.contains(node.name)) {
       found = true;
+    }
+    super.visitSimpleIdentifier(node);
+  }
+}
+
+final class _IdentifierSetVisitor extends RecursiveAstVisitor<void> {
+  _IdentifierSetVisitor(this.identifiers);
+
+  final Set<String> identifiers;
+  final Set<String> found = {};
+
+  @override
+  void visitFunctionExpression(FunctionExpression node) {}
+
+  @override
+  void visitSimpleIdentifier(SimpleIdentifier node) {
+    if (identifiers.contains(node.name)) {
+      found.add(node.name);
     }
     super.visitSimpleIdentifier(node);
   }

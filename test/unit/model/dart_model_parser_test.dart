@@ -1073,6 +1073,99 @@ Map<String, dynamic> _payload(Map<String, dynamic>? json) {
     expect(model.supportsDirectObjectFromJson, isFalse);
   });
 
+  test('resolves bare local aliases through data and data.items envelopes', () {
+    const cases = {
+      'data': '''
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+    final data = json?["data"];
+    final rawId = data is Map<String, dynamic>
+        ? data["report_id"]
+        : null;
+    return ReportModel(id: (rawId ?? "").toString());
+  }
+}
+''',
+      'data.items': '''
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+    final data = json?["data"];
+    final items = data is Map<String, dynamic> ? data["items"] : null;
+    final payload = items is Map<String, dynamic> ? items : const {};
+    final rawId = payload["report_id"];
+    return ReportModel(id: (rawId ?? "").toString());
+  }
+}
+''',
+    };
+
+    for (final entry in cases.entries) {
+      final result = parser.parse(entry.value, '${entry.key}_bare_alias.dart');
+
+      expect(result.isSafe, isTrue,
+          reason: '${entry.key}: ${result.diagnostics.join('\n')}');
+      final model = result.spec!.classes.single;
+      expect(model.fields.single.jsonKey, 'report_id', reason: entry.key);
+      expect(model.fields.single.isJsonKeyDerived, isFalse, reason: entry.key);
+      expect(model.preservedFromJson, isNotNull, reason: entry.key);
+      expect(model.supportsDirectObjectFromJson, isFalse, reason: entry.key);
+    }
+  });
+
+  test('refuses ambiguous, reassigned, and cyclic bare local aliases', () {
+    const factoryBodies = {
+      'reassigned': '''
+    var data = json?["data"];
+    data = json?["legacy"];
+    final rawId = data?["report_id"];
+    return ReportModel(id: (rawId ?? "").toString());''',
+      'multiple definitions': '''
+    final rawId = json?["report_id"];
+    final rawId = json?["legacy_id"];
+    return ReportModel(id: (rawId ?? "").toString());''',
+      'cycle': '''
+    final first = second;
+    final second = first;
+    return ReportModel(id: (first ?? "").toString());''',
+      'mutation': '''
+    final data = json?["data"];
+    if (data is Map<String, dynamic>) {
+      data["report_id"] = "changed";
+    }
+    final rawId = data is Map<String, dynamic>
+        ? data["report_id"]
+        : null;
+    return ReportModel(id: (rawId ?? "").toString());''',
+      'non-resolvable': '''
+    final rawId = unresolvedValue();
+    return ReportModel(id: (rawId ?? "").toString());''',
+    };
+
+    for (final entry in factoryBodies.entries) {
+      final source = '''
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+${entry.value}
+  }
+}
+''';
+      final result = parser.parse(source, '${entry.key}_alias.dart');
+
+      expect(result.isSafe, isFalse, reason: entry.key);
+      expect(result.spec, isNull, reason: entry.key);
+      expect(result.diagnostics.join('\n'), contains('ReportModel.id'),
+          reason: entry.key);
+      expect(result.diagnostics.join('\n'), contains('alias'),
+          reason: entry.key);
+    }
+  });
+
   test('records exact supported top-level root helper roles from the AST', () {
     final source = File('test/fixtures/models/direct_list_helpers.dart')
         .readAsStringSync();

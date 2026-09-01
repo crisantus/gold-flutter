@@ -11,6 +11,16 @@ final class EyeAskModelRenderer {
     ModelFileSpec spec, {
     required bool addCopyWith,
   }) {
+    final generatesRootDecoder = spec.rootClassName != null &&
+        !_declaresHelper(
+          spec,
+          ModelTopLevelFunctionRole.rootDecoder,
+        );
+    final generatesRootEncoder = spec.rootClassName != null &&
+        !_declaresHelper(
+          spec,
+          ModelTopLevelFunctionRole.rootEncoder,
+        );
     final buffer = StringBuffer()
       ..writeln('// ignore_for_file: prefer_single_quotes')
       ..writeln();
@@ -20,7 +30,7 @@ final class EyeAskModelRenderer {
           import.contains("'dart:convert'") ||
           import.contains('"dart:convert"'),
     );
-    if (!hasDartConvert) {
+    if ((generatesRootDecoder || generatesRootEncoder) && !hasDartConvert) {
       buffer.writeln("import 'dart:convert';");
     }
     for (final import in spec.imports) {
@@ -33,10 +43,7 @@ final class EyeAskModelRenderer {
       final rootPrefix = _lowercaseFirst(rootClassName);
       final fromJsonHelper = '${rootPrefix}FromJson';
       final toJsonHelper = '${rootPrefix}ToJson';
-      if (!_declaresHelper(
-        spec,
-        ModelTopLevelFunctionRole.rootDecoder,
-      )) {
+      if (generatesRootDecoder) {
         buffer
           ..writeln('$rootClassName $fromJsonHelper(String str) =>')
           ..writeln(
@@ -45,10 +52,7 @@ final class EyeAskModelRenderer {
           )
           ..writeln();
       }
-      if (!_declaresHelper(
-        spec,
-        ModelTopLevelFunctionRole.rootEncoder,
-      )) {
+      if (generatesRootEncoder) {
         buffer
           ..writeln(
             'String $toJsonHelper($rootClassName data) => '

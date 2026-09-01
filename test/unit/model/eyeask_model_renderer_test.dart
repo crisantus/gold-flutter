@@ -462,7 +462,8 @@ class ReportModel {
     );
   });
 
-  test('does not generate public root helpers for a private-only file', () {
+  test('private-only output has no generated helpers or unused convert import',
+      () async {
     const source = '''
 class _PrivateModel {
   final String id;
@@ -470,6 +471,11 @@ class _PrivateModel {
   factory _PrivateModel.fromJson(Map<String, dynamic>? json) =>
       _PrivateModel(id: (json?["id"] ?? "").toString());
 }
+
+Object createPrivateModels() => [
+      _PrivateModel.fromJson(const {}),
+      _PrivateModel.empty(),
+    ];
 ''';
     final parsed = parser.parse(source, 'private_only.dart');
 
@@ -481,7 +487,37 @@ class _PrivateModel {
 
     expect(rendered, isNot(contains('_privateModelFromJson')));
     expect(rendered, isNot(contains('_privateModelToJson')));
+    expect(rendered, isNot(contains("import 'dart:convert';")));
     expect(rendered, contains('class _PrivateModel'));
+    await _expectAnalyzerClean(rendered);
+  });
+
+  test('preserved root helpers do not cause a convert import to be invented',
+      () {
+    const source = '''
+ReportModel reportModelFromJson(String source) =>
+    ReportModel.fromJson(const {});
+
+String reportModelToJson(ReportModel data) => data.id;
+
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      ReportModel(id: (json?["id"] ?? "").toString());
+}
+''';
+    final parsed = parser.parse(source, 'preserved_helpers_no_convert.dart');
+
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+    final rendered = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+
+    expect(rendered, isNot(contains("import 'dart:convert';")));
+    expect('reportModelFromJson('.allMatches(rendered), hasLength(1));
+    expect('reportModelToJson('.allMatches(rendered), hasLength(1));
   });
 
   test('renders a derived key in both parsing and serialization', () {
