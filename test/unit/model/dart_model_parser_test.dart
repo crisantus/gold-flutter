@@ -1166,6 +1166,56 @@ ${entry.value}
     }
   });
 
+  const nestedExecutableFactoryBodies = {
+    'invoked local function mutation': '''
+    final data = json?["data"];
+    var rawId = data?["report_id"];
+    void overwriteId() {
+      rawId = "changed";
+    }
+    overwriteId();
+    return ReportModel(id: (rawId ?? "").toString());''',
+    'anonymous closure mutation': '''
+    final data = json?["data"];
+    var rawId = data?["report_id"];
+    final overwriteId = () {
+      rawId = "changed";
+    };
+    overwriteId();
+    return ReportModel(id: (rawId ?? "").toString());''',
+    'benign local function': '''
+    final data = json?["data"];
+    final rawId = data?["report_id"];
+    String normalize(String value) => value.trim();
+    normalize("unused");
+    return ReportModel(id: (rawId ?? "").toString());''',
+  };
+
+  for (final entry in nestedExecutableFactoryBodies.entries) {
+    test('refuses ${entry.key} in an alias-based factory', () {
+      final source = '''
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+${entry.value}
+  }
+}
+''';
+      final result = parser.parse(source, '${entry.key}_scope.dart');
+
+      expect(result.isSafe, isFalse, reason: entry.key);
+      expect(result.spec, isNull, reason: entry.key);
+      expect(result.diagnostics.join('\n'), contains('ReportModel.fromJson'),
+          reason: entry.key);
+      expect(
+        result.diagnostics.join('\n'),
+        contains('nested executable alias scope'),
+        reason: entry.key,
+      );
+    });
+  }
+
   test('records exact supported top-level root helper roles from the AST', () {
     final source = File('test/fixtures/models/direct_list_helpers.dart')
         .readAsStringSync();

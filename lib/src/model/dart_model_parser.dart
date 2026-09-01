@@ -447,6 +447,15 @@ final class DartModelParser {
     if (fieldSpecs.length != fields.length) {
       return null;
     }
+    if (preserveFromJson &&
+        fromJson!.body is BlockFunctionBody &&
+        _hasNestedExecutableScope(fromJson.body)) {
+      diagnostics.add(
+        'Unsupported nested executable alias scope in '
+        '$className.fromJson in $path:${fromJson.offset}.',
+      );
+      return null;
+    }
 
     final documentation = declaration.documentationComment;
     return ModelClassSpec(
@@ -942,6 +951,21 @@ final class _ReturnStatementVisitor extends RecursiveAstVisitor<void> {
   @override
   void visitReturnStatement(ReturnStatement node) {
     returns.add(node);
+  }
+}
+
+bool _hasNestedExecutableScope(FunctionBody body) {
+  final visitor = _NestedExecutableScopeVisitor();
+  body.accept(visitor);
+  return visitor.found;
+}
+
+final class _NestedExecutableScopeVisitor extends RecursiveAstVisitor<void> {
+  var found = false;
+
+  @override
+  void visitFunctionExpression(FunctionExpression node) {
+    found = true;
   }
 }
 
