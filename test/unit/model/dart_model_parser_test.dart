@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:gold_flutter/src/model/dart_model_parser.dart';
 import 'package:gold_flutter/src/model/model_field_spec.dart';
+import 'package:gold_flutter/src/model/model_top_level_function_spec.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -418,7 +419,11 @@ class ReportModel {
     final result = parser.parse(source, 'named_constructor_model.dart');
 
     expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
-    expect(result.spec!.classes.single.fields.single.jsonKey, 'id');
+    final model = result.spec!.classes.single;
+    expect(model.fields.single.jsonKey, 'id');
+    expect(model.preservedConstructors, [
+      'ReportModel._({required this.id});',
+    ]);
   });
 
   test('preserves safe empty accessors, custom helpers, and copyWith exactly',
@@ -789,5 +794,315 @@ class ReportModel {
 
     expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
     expect(result.spec!.classes.single.fields.single.jsonKey, 'id');
+  });
+
+  test('selects the first public class as the root without reordering classes',
+      () {
+    const source = '''
+class _PayloadModel {
+  final String id;
+
+  _PayloadModel({required this.id});
+
+  factory _PayloadModel.fromJson(Map<String, dynamic>? json) =>
+      _PayloadModel(id: (json?["id"] ?? "").toString());
+}
+
+class ReportModel {
+  final String title;
+
+  ReportModel({required this.title});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      ReportModel(title: (json?["title"] ?? "").toString());
+}
+''';
+
+    final result = parser.parse(source, 'first_public_root.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    expect(result.spec!.rootClassName, 'ReportModel');
+    expect(result.spec!.classes.map((model) => model.name), [
+      '_PayloadModel',
+      'ReportModel',
+    ]);
+  });
+
+  test('allows a private-only file without assigning a public root', () {
+    const source = '''
+class _PayloadModel {
+  final String id;
+
+  _PayloadModel({required this.id});
+
+  factory _PayloadModel.fromJson(Map<String, dynamic>? json) =>
+      _PayloadModel(id: (json?["id"] ?? "").toString());
+}
+''';
+
+    final result = parser.parse(source, 'private_only.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    expect(result.spec!.rootClassName, isNull);
+  });
+
+  test('refuses class headers that the renderer cannot reproduce', () {
+    const headers = {
+      'abstract': 'abstract class ReportModel',
+      'type parameters': 'class ReportModel<T>',
+      'extends': 'class ReportModel extends BaseModel',
+      'with': 'class ReportModel with Marker',
+      'implements': 'class ReportModel implements Marker',
+      'mixin class': 'mixin class ReportModel',
+    };
+
+    for (final entry in headers.entries) {
+      final result = parser.parse('${entry.value} {}', 'header.dart');
+
+      expect(result.isSafe, isFalse, reason: entry.key);
+      expect(result.spec, isNull, reason: entry.key);
+      expect(result.diagnostics.join('\n'), contains('ReportModel'),
+          reason: entry.key);
+      expect(result.diagnostics.join('\n'), contains(entry.key),
+          reason: entry.key);
+    }
+  });
+
+  test('refuses scalar nested types without a local class contract', () {
+    const sources = {
+      'unknown': '''
+class ReportModel {
+  final RemoteModel remote;
+  ReportModel({required this.remote});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      ReportModel(remote: RemoteModel.fromJson(json?["remote"]));
+}
+''',
+      'prefixed': '''
+import 'remote.dart' as remote;
+class ReportModel {
+  final remote.RemoteModel value;
+  ReportModel({required this.value});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      ReportModel(value: remote.RemoteModel.fromJson(json?["value"]));
+}
+''',
+    };
+
+    for (final entry in sources.entries) {
+      final result = parser.parse(entry.value, '${entry.key}.dart');
+
+      expect(result.isSafe, isFalse, reason: entry.key);
+      expect(result.spec, isNull, reason: entry.key);
+      expect(result.diagnostics.join('\n'), contains('ReportModel.'),
+          reason: entry.key);
+    }
+  });
+
+  test('validates the exact supported fromJson parameter contract', () {
+    const parameters = {
+      'wrong name': 'Map<String, dynamic>? payload',
+      'wrong type': 'dynamic json',
+      'extra parameter': 'Map<String, dynamic>? json, int version',
+      'named parameter': '{Map<String, dynamic>? json}',
+    };
+
+    for (final entry in parameters.entries) {
+      final source = '''
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson(${entry.value}) => ReportModel(id: "");
+}
+''';
+      final result = parser.parse(source, 'from_json_parameter.dart');
+
+      expect(result.isSafe, isFalse, reason: entry.key);
+      expect(result.spec, isNull, reason: entry.key);
+      expect(result.diagnostics.join('\n'), contains('ReportModel.fromJson'),
+          reason: entry.key);
+    }
+  });
+
+  test('accepts nullable and nonnullable supported fromJson maps', () {
+    for (final type in const [
+      'Map<String, dynamic>?',
+      'Map<String, dynamic>',
+    ]) {
+      final source = '''
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson($type json) =>
+      ReportModel(id: (json["id"] ?? "").toString());
+}
+''';
+      final result = parser.parse(source, 'supported_from_json.dart');
+
+      expect(result.isSafe, isTrue,
+          reason: '$type: ${result.diagnostics.join('\n')}');
+    }
+  });
+
+  test('refuses direct nonnullable nested-model self and mutual cycles', () {
+    const sources = {
+      'self': '''
+class NodeModel {
+  final NodeModel child;
+  NodeModel({required this.child});
+  factory NodeModel.fromJson(Map<String, dynamic>? json) =>
+      NodeModel(child: NodeModel.fromJson(json?["child"]));
+}
+''',
+      'mutual': '''
+class FirstModel {
+  final SecondModel second;
+  FirstModel({required this.second});
+  factory FirstModel.fromJson(Map<String, dynamic>? json) =>
+      FirstModel(second: SecondModel.fromJson(json?["second"]));
+}
+class SecondModel {
+  final FirstModel first;
+  SecondModel({required this.first});
+  factory SecondModel.fromJson(Map<String, dynamic>? json) =>
+      SecondModel(first: FirstModel.fromJson(json?["first"]));
+}
+''',
+    };
+
+    for (final entry in sources.entries) {
+      final result = parser.parse(entry.value, '${entry.key}_cycle.dart');
+
+      expect(result.isSafe, isFalse, reason: entry.key);
+      expect(result.spec, isNull, reason: entry.key);
+      expect(result.diagnostics.join('\n'), contains('cycle'),
+          reason: entry.key);
+    }
+  });
+
+  test('derives acronym-safe snake-case keys and records their origin', () {
+    const source = '''
+class ReportModel {
+  final String currentPage;
+  final String URLValue;
+
+  ReportModel({required this.currentPage, required this.URLValue});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        currentPage: "fallback",
+        URLValue: "fallback",
+      );
+}
+''';
+
+    final result = parser.parse(source, 'derived_keys.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    expect(
+      result.spec!.classes.single.fields.map((field) => field.jsonKey),
+      ['current_page', 'url_value'],
+    );
+    expect(
+      result.spec!.classes.single.fields.map((field) => field.isJsonKeyDerived),
+      [isTrue, isTrue],
+    );
+  });
+
+  test('preserves an envelope factory and safely discovers aliased leaf keys',
+      () {
+    const factorySource = '''factory ReportModel.fromJson(
+    Map<String, dynamic>? json,
+  ) {
+    final data = json?["data"];
+    final items = data is Map<String, dynamic> ? data["items"] : null;
+    final payload = items is Map<String, dynamic> ? items : const {};
+    return ReportModel(
+      id: (payload["report_id"] ?? "").toString(),
+    );
+  }''';
+    const source = '''
+class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  $factorySource
+}
+''';
+
+    final result = parser.parse(source, 'aliased_envelope.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    final model = result.spec!.classes.single;
+    expect(model.fields.single.jsonKey, 'report_id');
+    expect(model.preservedFromJson, factorySource);
+    expect(model.supportsDirectObjectFromJson, isFalse);
+  });
+
+  test('records exact supported top-level root helper roles from the AST', () {
+    final source = File('test/fixtures/models/direct_list_helpers.dart')
+        .readAsStringSync();
+
+    final result = parser.parse(source, 'direct_list_helpers.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+    expect(
+      result.spec!.topLevelFunctions.map((function) => function.role),
+      [
+        ModelTopLevelFunctionRole.rootDecoder,
+        ModelTopLevelFunctionRole.rootEncoder,
+      ],
+    );
+  });
+
+  test('refuses a same-name top-level helper with an unsupported shape', () {
+    const source = '''
+int reportModelFromJson(int value) => value;
+
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      ReportModel(id: (json?["id"] ?? "").toString());
+}
+''';
+
+    final result = parser.parse(source, 'invalid_root_helper.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('reportModelFromJson'));
+  });
+
+  test('allows nullable nested-model links that break recursive defaults', () {
+    const source = '''
+class NodeModel {
+  final NodeModel? child;
+  NodeModel({required this.child});
+  factory NodeModel.fromJson(Map<String, dynamic>? json) => NodeModel(
+        child: json?["child"] == null
+            ? null
+            : NodeModel.fromJson(json?["child"]),
+      );
+}
+''';
+
+    final result = parser.parse(source, 'nullable_link.dart');
+
+    expect(result.isSafe, isTrue, reason: result.diagnostics.join('\n'));
+  });
+
+  test('refuses an invalid fromJson contract on a zero-field class', () {
+    const source = '''
+class EmptyModel {
+  factory EmptyModel.fromJson(int json) => EmptyModel();
+}
+''';
+
+    final result = parser.parse(source, 'empty_invalid_from_json.dart');
+
+    expect(result.isSafe, isFalse);
+    expect(result.spec, isNull);
+    expect(result.diagnostics.join('\n'), contains('EmptyModel.fromJson'));
   });
 }

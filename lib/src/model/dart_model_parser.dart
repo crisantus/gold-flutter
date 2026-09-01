@@ -6,6 +6,7 @@ import 'package:analyzer/error/error.dart';
 import 'model_class_spec.dart';
 import 'model_field_spec.dart';
 import 'model_file_spec.dart';
+import 'model_top_level_function_spec.dart';
 
 /// The safe result of parsing one complete Dart model source file.
 final class ModelParseResult {
@@ -88,10 +89,10 @@ final class DartModelParser {
         .toSet();
     final classNames =
         classes.map((declaration) => declaration.name.lexeme).toSet();
-    final topLevelFunctionNames = unit.declarations
-        .whereType<FunctionDeclaration>()
-        .map((declaration) => declaration.name.lexeme)
-        .toSet();
+    final topLevelFunctions =
+        unit.declarations.whereType<FunctionDeclaration>().toList();
+    final topLevelFunctionNames =
+        topLevelFunctions.map((declaration) => declaration.name.lexeme).toSet();
     final classSpecs = <ModelClassSpec>[];
     for (final declaration in classes) {
       final classSpec = _parseClass(
@@ -112,6 +113,27 @@ final class DartModelParser {
       return ModelParseResult(spec: null, diagnostics: diagnostics);
     }
 
+    _diagnoseNonNullableNestedCycles(classSpecs, path, diagnostics);
+
+    final publicClassNames = classSpecs
+        .where((model) => !_isPrivateIdentifier(model.name))
+        .map((model) => model.name)
+        .toList(growable: false);
+    final rootClassName =
+        publicClassNames.isEmpty ? null : publicClassNames.first;
+    final topLevelFunctionSpecs = _parseTopLevelFunctions(
+      topLevelFunctions,
+      unit.declarations,
+      source,
+      path,
+      rootClassName,
+      diagnostics,
+    );
+
+    if (diagnostics.isNotEmpty) {
+      return ModelParseResult(spec: null, diagnostics: diagnostics);
+    }
+
     final imports = unit.directives
         .whereType<ImportDirective>()
         .map((directive) => _sourceSlice(source, directive));
@@ -122,9 +144,10 @@ final class DartModelParser {
     return ModelParseResult(
       spec: ModelFileSpec(
         imports: imports,
-        rootClassName: classSpecs.first.name,
+        rootClassName: rootClassName,
         classes: classSpecs,
         preservedTopLevelDeclarations: preservedTopLevelDeclarations,
+        topLevelFunctions: topLevelFunctionSpecs,
       ),
       diagnostics: const [],
     );
@@ -140,9 +163,20 @@ final class DartModelParser {
     List<String> diagnostics,
   ) {
     final className = declaration.name.lexeme;
+    final unsupportedHeader = _unsupportedClassHeader(declaration);
+    if (unsupportedHeader != null) {
+      diagnostics.add(
+        'Unsupported $unsupportedHeader class header for $className in '
+        '$path:${declaration.offset}.',
+      );
+      return null;
+    }
+    final diagnosticStart = diagnostics.length;
     final fields = <_ParsedField>[];
     final fieldNames = <String>{};
+    final preservedConstructors = <String>[];
     final preservedMembers = <String>[];
+    final preservedHelperMembers = <String>[];
     var hasCopyWith = false;
     final converterNames = {
       ...topLevelFunctionNames,
@@ -224,6 +258,12 @@ final class DartModelParser {
       }
 
       if (member is ConstructorDeclaration) {
+        final name = member.name?.lexeme;
+        if (name != null &&
+            name != 'fromJson' &&
+            !_generatedStructureNames.contains(name)) {
+          preservedConstructors.add(_sourceSlice(source, member));
+        }
         continue;
       }
 
@@ -248,7 +288,11 @@ final class DartModelParser {
           }
           continue;
         }
-        if (_isSupportedStructuralMethod(member, className)) {
+        if (_isSupportedToJsonMethod(member)) {
+          continue;
+        }
+        if (_isSupportedListHelper(member, className)) {
+          preservedHelperMembers.add(_sourceSlice(source, member));
           continue;
         }
         if (_collidesWithGeneratedStructure(member)) {
@@ -263,7 +307,7 @@ final class DartModelParser {
       preservedMembers.add(_sourceSlice(source, member));
     }
 
-    if (fields.isEmpty && diagnostics.isNotEmpty) {
+    if (fields.isEmpty && diagnostics.length != diagnosticStart) {
       return null;
     }
 
@@ -271,17 +315,32 @@ final class DartModelParser {
         .whereType<ConstructorDeclaration>()
         .where((constructor) => constructor.name?.lexeme == 'fromJson')
         .toList();
-    if (fields.isNotEmpty && fromJsonConstructors.length != 1) {
+    if ((fields.isNotEmpty && fromJsonConstructors.length != 1) ||
+        fromJsonConstructors.length > 1) {
       diagnostics.add(
         '$className must declare exactly one fromJson constructor in $path.',
       );
       return null;
     }
 
+    final fromJson =
+        fromJsonConstructors.isEmpty ? null : fromJsonConstructors.first;
+    if (fromJson != null && !_hasSupportedFromJsonSignature(fromJson)) {
+      diagnostics.add(
+        'Unsupported $className.fromJson parameter contract in '
+        '$path:${fromJson.offset}; expected exactly one required positional '
+        'Map<String, dynamic> or Map<String, dynamic>? parameter named json.',
+      );
+      return null;
+    }
+
     final fieldSpecs = <ModelFieldSpec>[];
+    var preserveFromJson = false;
+    var supportsDirectObjectFromJson = true;
     if (fields.isNotEmpty) {
+      final aliases = _jsonAliases(fromJson!.body);
       final arguments = _returnedClassArguments(
-        fromJsonConstructors.single.body,
+        fromJson.body,
         className,
         declaration.members
             .whereType<ConstructorDeclaration>()
@@ -315,18 +374,38 @@ final class DartModelParser {
           continue;
         }
         final expression = matchingArguments.single.expression;
-        final keys = _terminalJsonKeys(expression);
-        if (keys.length != 1) {
+        final access = _jsonAccess(expression, aliases);
+        final keys = access.paths.map((path) => path.last).toSet();
+        if (keys.length > 1) {
           diagnostics.add(
             'Unable to uniquely discover a JSON key for '
             '$className.${field.name} in $path.',
           );
           continue;
         }
+        final keyOrigin = keys.isEmpty
+            ? ModelJsonKeyOrigin.derived
+            : ModelJsonKeyOrigin.discovered;
+        final jsonKey =
+            keys.isEmpty ? _snakeCaseJsonKey(field.name) : keys.single;
+        preserveFromJson = preserveFromJson ||
+            access.usesAlias ||
+            access.paths.any((path) => path.length > 1);
+        if (access.paths.any((path) => path.length > 1)) {
+          supportsDirectObjectFromJson = false;
+        }
         if (field.shape.kind == ModelFieldKind.list &&
             !_isSupportedListElement(field.shape.nestedType!, classNames)) {
           diagnostics.add(
             'Unsupported list element ${field.shape.nestedType} for '
+            '$className.${field.name} in $path.',
+          );
+          continue;
+        }
+        if (field.shape.kind == ModelFieldKind.nestedModel &&
+            !classNames.contains(field.shape.nestedType)) {
+          diagnostics.add(
+            'Unsupported nested model ${field.shape.nestedType} for '
             '$className.${field.name} in $path.',
           );
           continue;
@@ -346,7 +425,8 @@ final class DartModelParser {
           ModelFieldSpec(
             name: field.name,
             typeSource: field.typeSource,
-            jsonKey: keys.single,
+            jsonKey: jsonKey,
+            jsonKeyOrigin: keyOrigin,
             kind: field.shape.kind,
             isNullable: field.shape.isNullable,
             nestedType: field.shape.nestedType,
@@ -368,12 +448,232 @@ final class DartModelParser {
           .map((annotation) => _sourceSlice(source, annotation)),
       documentation:
           documentation == null ? null : _sourceSlice(source, documentation),
+      preservedConstructors: preservedConstructors,
       preservedMembers: preservedMembers,
+      preservedHelperMembers: preservedHelperMembers,
+      preservedFromJson:
+          preserveFromJson ? _sourceSlice(source, fromJson!) : null,
+      supportsDirectObjectFromJson: supportsDirectObjectFromJson,
       hasCopyWith: hasCopyWith,
       sourceOffset: declaration.offset,
     );
   }
 }
+
+String? _unsupportedClassHeader(ClassDeclaration declaration) {
+  if (declaration.abstractKeyword != null) {
+    return 'abstract';
+  }
+  if (declaration.classKeyword.previous?.lexeme == 'augment') {
+    return 'augment';
+  }
+  if (declaration.baseKeyword != null) {
+    return 'base';
+  }
+  if (declaration.finalKeyword != null) {
+    return 'final';
+  }
+  if (declaration.interfaceKeyword != null) {
+    return 'interface';
+  }
+  if (declaration.sealedKeyword != null) {
+    return 'sealed';
+  }
+  if (declaration.mixinKeyword != null) {
+    return 'mixin class';
+  }
+  if (declaration.typeParameters != null) {
+    return 'type parameters';
+  }
+  if (declaration.extendsClause != null) {
+    return 'extends';
+  }
+  if (declaration.withClause != null) {
+    return 'with';
+  }
+  if (declaration.implementsClause != null) {
+    return 'implements';
+  }
+  if (declaration.nativeClause != null) {
+    return 'native';
+  }
+  return null;
+}
+
+List<ModelTopLevelFunctionSpec> _parseTopLevelFunctions(
+  List<FunctionDeclaration> functions,
+  Iterable<CompilationUnitMember> declarations,
+  String source,
+  String path,
+  String? rootClassName,
+  List<String> diagnostics,
+) {
+  final specs = <ModelTopLevelFunctionSpec>[];
+  if (rootClassName == null) {
+    return [
+      for (final function in functions)
+        ModelTopLevelFunctionSpec(
+          name: function.name.lexeme,
+          source: _sourceSlice(source, function),
+          role: ModelTopLevelFunctionRole.other,
+          sourceOffset: function.offset,
+        ),
+    ];
+  }
+
+  final prefix = _lowercaseFirst(rootClassName);
+  final decoderName = '${prefix}FromJson';
+  final encoderName = '${prefix}ToJson';
+  final structuralNames = {decoderName, encoderName};
+  for (final declaration
+      in declarations.whereType<TopLevelVariableDeclaration>()) {
+    for (final variable in declaration.variables.variables) {
+      if (structuralNames.contains(variable.name.lexeme)) {
+        diagnostics.add(
+          'Unsupported root helper ${variable.name.lexeme} in '
+          '$path:${variable.offset}; expected a top-level function.',
+        );
+      }
+    }
+  }
+
+  for (final name in structuralNames) {
+    final matches = functions.where((function) => function.name.lexeme == name);
+    if (matches.length > 1) {
+      diagnostics.add('Duplicate root helper $name in $path.');
+    }
+  }
+
+  for (final function in functions) {
+    final name = function.name.lexeme;
+    var role = ModelTopLevelFunctionRole.other;
+    if (name == decoderName) {
+      if (!_isSupportedRootDecoder(function, rootClassName)) {
+        diagnostics.add(
+          'Unsupported root decoder $name in $path:${function.offset}.',
+        );
+      } else {
+        role = ModelTopLevelFunctionRole.rootDecoder;
+      }
+    } else if (name == encoderName) {
+      if (!_isSupportedRootEncoder(function, rootClassName)) {
+        diagnostics.add(
+          'Unsupported root encoder $name in $path:${function.offset}.',
+        );
+      } else {
+        role = ModelTopLevelFunctionRole.rootEncoder;
+      }
+    }
+    specs.add(
+      ModelTopLevelFunctionSpec(
+        name: name,
+        source: _sourceSlice(source, function),
+        role: role,
+        sourceOffset: function.offset,
+      ),
+    );
+  }
+  return specs;
+}
+
+bool _isSupportedRootDecoder(
+  FunctionDeclaration function,
+  String rootClassName,
+) {
+  final parameters = function.functionExpression.parameters;
+  return !function.isGetter &&
+      !function.isSetter &&
+      function.externalKeyword == null &&
+      function.functionExpression.typeParameters == null &&
+      parameters != null &&
+      _hasSingleRequiredParameterOfType(parameters, 'String') &&
+      (_typeSourceIs(function.returnType, rootClassName) ||
+          _typeSourceIs(function.returnType, 'List<$rootClassName>'));
+}
+
+bool _isSupportedRootEncoder(
+  FunctionDeclaration function,
+  String rootClassName,
+) {
+  final parameters = function.functionExpression.parameters;
+  return !function.isGetter &&
+      !function.isSetter &&
+      function.externalKeyword == null &&
+      function.functionExpression.typeParameters == null &&
+      parameters != null &&
+      (_hasSingleRequiredParameterOfType(parameters, rootClassName) ||
+          _hasSingleRequiredParameterOfType(
+            parameters,
+            'List<$rootClassName>',
+          )) &&
+      _typeSourceIs(function.returnType, 'String');
+}
+
+void _diagnoseNonNullableNestedCycles(
+  List<ModelClassSpec> classes,
+  String path,
+  List<String> diagnostics,
+) {
+  final edges = {
+    for (final model in classes)
+      model.name: model.fields
+          .where(
+            (field) =>
+                field.kind == ModelFieldKind.nestedModel && !field.isNullable,
+          )
+          .map((field) => field.nestedType!)
+          .toList(growable: false),
+  };
+  final state = <String, int>{};
+  final stack = <String>[];
+  final reported = <String>{};
+
+  void visit(String name) {
+    state[name] = 1;
+    stack.add(name);
+    for (final target in edges[name] ?? const []) {
+      if (state[target] == 1) {
+        final start = stack.indexOf(target);
+        final cycle = [...stack.sublist(start), target];
+        final signature = cycle.join(' -> ');
+        if (reported.add(signature)) {
+          diagnostics.add(
+            'Unsupported nonnullable nested-model cycle in $path: '
+            '$signature.',
+          );
+        }
+      } else if (state[target] != 2) {
+        visit(target);
+      }
+    }
+    stack.removeLast();
+    state[name] = 2;
+  }
+
+  for (final name in edges.keys) {
+    if (state[name] == null) {
+      visit(name);
+    }
+  }
+}
+
+String _snakeCaseJsonKey(String name) {
+  return name
+      .replaceAllMapped(
+        RegExp(r'([A-Z]+)([A-Z][a-z])'),
+        (match) => '${match[1]}_${match[2]}',
+      )
+      .replaceAllMapped(
+        RegExp(r'([a-z0-9])([A-Z])'),
+        (match) => '${match[1]}_${match[2]}',
+      )
+      .toLowerCase();
+}
+
+bool _isPrivateIdentifier(String name) => name.startsWith('_');
+
+String _lowercaseFirst(String value) =>
+    '${value.substring(0, 1).toLowerCase()}${value.substring(1)}';
 
 _FieldShape? _fieldShape(NamedType type, Set<String> enumNames) {
   final name = type.name2.lexeme;
@@ -498,10 +798,16 @@ ArgumentList? _returnedClassArguments(
   );
 }
 
-Set<String> _terminalJsonKeys(Expression expression) {
-  final visitor = _JsonKeyVisitor();
+_JsonAccess _jsonAccess(
+  Expression expression,
+  Map<String, List<List<String>>> aliases,
+) {
+  final visitor = _JsonAccessVisitor(aliases);
   expression.accept(visitor);
-  return visitor.keys;
+  return _JsonAccess(
+    paths: visitor.paths,
+    usesAlias: visitor.usesAlias,
+  );
 }
 
 bool _callsNamed(Expression expression, String name) {
@@ -540,16 +846,34 @@ final class _FieldShape {
   final String? nestedType;
 }
 
-final class _JsonKeyVisitor extends RecursiveAstVisitor<void> {
-  final Set<String> keys = {};
+final class _JsonAccess {
+  const _JsonAccess({required this.paths, required this.usesAlias});
+
+  final List<List<String>> paths;
+  final bool usesAlias;
+}
+
+final class _JsonAccessVisitor extends RecursiveAstVisitor<void> {
+  _JsonAccessVisitor(this.aliases);
+
+  final Map<String, List<List<String>>> aliases;
+  final List<List<String>> paths = [];
+  var usesAlias = false;
 
   @override
   void visitIndexExpression(IndexExpression node) {
     final index = node.index;
-    if (!_isIntermediateIndexReceiver(node) &&
-        _jsonTargetDepth(node.realTarget) != null &&
-        index is SimpleStringLiteral) {
-      keys.add(index.value);
+    if (!_isIntermediateIndexReceiver(node) && index is SimpleStringLiteral) {
+      final targetPaths = _jsonTargetPaths(node.realTarget, aliases);
+      for (final path in targetPaths) {
+        final complete = [...path, index.value];
+        if (!paths.any((candidate) => _samePath(candidate, complete))) {
+          paths.add(complete);
+        }
+      }
+      if (_referencesAnyIdentifier(node.realTarget, aliases.keys)) {
+        usesAlias = true;
+      }
     }
     super.visitIndexExpression(node);
   }
@@ -582,21 +906,125 @@ final class _NamedCallVisitor extends RecursiveAstVisitor<void> {
   }
 }
 
-int? _jsonTargetDepth(Expression expression) {
+List<List<String>> _jsonTargetPaths(
+  Expression expression,
+  Map<String, List<List<String>>> aliases,
+) {
   if (expression is SimpleIdentifier) {
-    return expression.name == 'json' ? 0 : null;
+    if (expression.name == 'json') {
+      return const [<String>[]];
+    }
+    return aliases[expression.name] ?? const [];
   }
   if (expression is ParenthesizedExpression) {
-    return _jsonTargetDepth(expression.expression);
+    return _jsonTargetPaths(expression.expression, aliases);
   }
   if (expression is PostfixExpression) {
-    return _jsonTargetDepth(expression.operand);
+    return _jsonTargetPaths(expression.operand, aliases);
+  }
+  if (expression is AsExpression) {
+    return _jsonTargetPaths(expression.expression, aliases);
   }
   if (expression is IndexExpression) {
-    final depth = _jsonTargetDepth(expression.realTarget);
-    return depth == null ? null : depth + 1;
+    final index = expression.index;
+    if (index is! SimpleStringLiteral) {
+      return const [];
+    }
+    return [
+      for (final path in _jsonTargetPaths(expression.realTarget, aliases))
+        [...path, index.value],
+    ];
   }
-  return null;
+  if (expression is BinaryExpression && expression.operator.lexeme == '??') {
+    return _uniquePaths([
+      ..._jsonTargetPaths(expression.leftOperand, aliases),
+      ..._jsonTargetPaths(expression.rightOperand, aliases),
+    ]);
+  }
+  if (expression is ConditionalExpression) {
+    return _uniquePaths([
+      ..._jsonTargetPaths(expression.thenExpression, aliases),
+      ..._jsonTargetPaths(expression.elseExpression, aliases),
+    ]);
+  }
+  if (expression is MethodInvocation &&
+      expression.methodName.name == 'from' &&
+      expression.argumentList.arguments.length == 1) {
+    return _jsonTargetPaths(
+      expression.argumentList.arguments.single,
+      aliases,
+    );
+  }
+  return const [];
+}
+
+Map<String, List<List<String>>> _jsonAliases(FunctionBody body) {
+  if (body is! BlockFunctionBody) {
+    return const {};
+  }
+  final aliases = <String, List<List<String>>>{};
+  for (final statement in body.block.statements) {
+    if (statement is! VariableDeclarationStatement) {
+      continue;
+    }
+    for (final variable in statement.variables.variables) {
+      final initializer = variable.initializer;
+      if (initializer == null) {
+        continue;
+      }
+      final paths = _jsonTargetPaths(initializer, aliases);
+      if (paths.isNotEmpty) {
+        aliases[variable.name.lexeme] = paths;
+      }
+    }
+  }
+  return aliases;
+}
+
+List<List<String>> _uniquePaths(Iterable<List<String>> paths) {
+  final unique = <List<String>>[];
+  for (final path in paths) {
+    if (!unique.any((candidate) => _samePath(candidate, path))) {
+      unique.add(path);
+    }
+  }
+  return unique;
+}
+
+bool _samePath(List<String> left, List<String> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _referencesAnyIdentifier(
+  AstNode node,
+  Iterable<String> identifiers,
+) {
+  final visitor = _IdentifierVisitor(identifiers.toSet());
+  node.accept(visitor);
+  return visitor.found;
+}
+
+final class _IdentifierVisitor extends RecursiveAstVisitor<void> {
+  _IdentifierVisitor(this.identifiers);
+
+  final Set<String> identifiers;
+  var found = false;
+
+  @override
+  void visitSimpleIdentifier(SimpleIdentifier node) {
+    if (identifiers.contains(node.name)) {
+      found = true;
+    }
+    super.visitSimpleIdentifier(node);
+  }
 }
 
 ArgumentList? _classConstructionArguments(
@@ -662,7 +1090,27 @@ bool _isIntermediateIndexReceiver(IndexExpression node) {
   return parent is IndexExpression && parent.target == receiver;
 }
 
-bool _isSupportedStructuralMethod(
+bool _isSupportedToJsonMethod(MethodDeclaration method) {
+  if (method.isGetter ||
+      method.isSetter ||
+      method.isOperator ||
+      method.isAbstract ||
+      method.externalKeyword != null ||
+      method.typeParameters != null) {
+    return false;
+  }
+  final parameters = method.parameters;
+  if (parameters == null) {
+    return false;
+  }
+
+  return method.name.lexeme == 'toJson' &&
+      !method.isStatic &&
+      parameters.parameters.isEmpty &&
+      _typeSourceIs(method.returnType, 'Map<String, dynamic>');
+}
+
+bool _isSupportedListHelper(
   MethodDeclaration method,
   String className,
 ) {
@@ -680,10 +1128,6 @@ bool _isSupportedStructuralMethod(
   }
 
   switch (method.name.lexeme) {
-    case 'toJson':
-      return !method.isStatic &&
-          parameters.parameters.isEmpty &&
-          _typeSourceIs(method.returnType, 'Map<String, dynamic>');
     case 'fromJsonList':
     case 'listFromJson':
       return method.isStatic &&
@@ -703,6 +1147,25 @@ bool _isSupportedStructuralMethod(
     default:
       return false;
   }
+}
+
+bool _hasSupportedFromJsonSignature(ConstructorDeclaration constructor) {
+  if (constructor.factoryKeyword == null ||
+      constructor.externalKeyword != null ||
+      constructor.redirectedConstructor != null ||
+      constructor.parameters.parameters.length != 1) {
+    return false;
+  }
+  final parameter = constructor.parameters.parameters.single;
+  if (!parameter.isRequiredPositional) {
+    return false;
+  }
+  final normal =
+      parameter is DefaultFormalParameter ? parameter.parameter : parameter;
+  return normal is SimpleFormalParameter &&
+      normal.name?.lexeme == 'json' &&
+      (_typeSourceIs(normal.type, 'Map<String, dynamic>') ||
+          _typeSourceIs(normal.type, 'Map<String, dynamic>?'));
 }
 
 bool _isSupportedCopyWith(MethodDeclaration method, String className) {

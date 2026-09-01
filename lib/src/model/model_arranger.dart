@@ -43,12 +43,10 @@ final class ModelArranger {
     }
     final spec = parsed.spec!;
     if (addTest) {
-      final inaccessible = testRenderer.inaccessibleSymbols(spec);
-      if (inaccessible.isNotEmpty) {
-        throw ModelArrangementException(
-          'Cannot generate a focused test for library-private symbol: '
-          '${inaccessible.join(', ')}',
-        );
+      final unsupported = testRenderer.unsupportedReason(spec);
+      if (unsupported != null) {
+        throw ModelArrangementException('Cannot generate a focused test. '
+            '$unsupported');
       }
     }
 
@@ -146,6 +144,13 @@ final class ModelArranger {
       files: files,
       commands: commands,
       notices: [
+        for (final model in spec.classes)
+          for (final field in model.fields)
+            if (field.isJsonKeyDerived)
+              PlannedNotice(
+                'Derived JSON key ${model.name}.${field.name} as '
+                '"${field.jsonKey}" because no key was discoverable.',
+              ),
         if (addCopyWith)
           const PlannedNotice(
             'Generated nullable copyWith parameters use '

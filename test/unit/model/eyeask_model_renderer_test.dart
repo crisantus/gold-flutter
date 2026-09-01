@@ -300,6 +300,209 @@ class EmptyModel {}
     expect(rendered, contains('class EmptyModel {\n\n  EmptyModel();'));
     await _expectAnalyzerClean(rendered);
   });
+
+  for (final fixtureName in const [
+    'direct_list_helpers',
+    'data_helpers',
+    'data_items_helpers',
+  ]) {
+    test('preserves $fixtureName root helpers exactly without duplicates',
+        () async {
+      final source =
+          File('test/fixtures/models/$fixtureName.dart').readAsStringSync();
+      final parsed = parser.parse(source, '$fixtureName.dart');
+
+      expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+      final rendered = const EyeAskModelRenderer().render(
+        parsed.spec!,
+        addCopyWith: false,
+      );
+      final helperSources = parsed.spec!.topLevelFunctions
+          .where((function) => function.name.startsWith('reportModel'))
+          .map((function) => function.source);
+
+      for (final helper in helperSources) {
+        expect(helper.allMatches(rendered), hasLength(1));
+      }
+      expect('reportModelFromJson('.allMatches(rendered), hasLength(1));
+      expect('reportModelToJson('.allMatches(rendered), hasLength(1));
+      await _expectAnalyzerClean(rendered);
+    });
+  }
+
+  test('preserves class list helpers before generated toJson', () {
+    final source =
+        File('test/fixtures/models/data_items_helpers.dart').readAsStringSync();
+    final parsed = parser.parse(source, 'data_items_helpers.dart');
+
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+    final model = parsed.spec!.classes.single;
+    final rendered = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+
+    expect(model.preservedHelperMembers, hasLength(2));
+    for (final helper in model.preservedHelperMembers) {
+      expect(helper.allMatches(rendered), hasLength(1));
+      expect(rendered.indexOf(helper),
+          lessThan(rendered.indexOf('  Map<String, dynamic> toJson()')));
+    }
+  });
+
+  test('preserves an aliased envelope factory instead of flattening it', () {
+    const factorySource = '''factory ReportModel.fromJson(
+    Map<String, dynamic>? json,
+  ) {
+    final data = json?["data"];
+    final payload = data is Map<String, dynamic> ? data : const {};
+    return ReportModel(id: (payload["id"] ?? "").toString());
+  }''';
+    const source = '''
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  $factorySource
+}
+''';
+    final parsed = parser.parse(source, 'preserved_factory.dart');
+
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+    final rendered = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+
+    expect(factorySource.allMatches(rendered), hasLength(1));
+    expect(rendered, isNot(contains('id: (json?["id"] ?? "").toString()')));
+  });
+
+  test('keeps a named constructor required by a preserved envelope factory',
+      () async {
+    const source = '''
+class ReportModel {
+  final String id;
+  ReportModel._({required this.id});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+    final data = json?["data"];
+    final payload = data is Map<String, dynamic> ? data : const {};
+    return ReportModel._(id: (payload["id"] ?? "").toString());
+  }
+}
+''';
+    final parsed = parser.parse(source, 'named_envelope_factory.dart');
+
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+    final rendered = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+
+    expect(
+      'ReportModel._({required this.id});'.allMatches(rendered),
+      hasLength(1),
+    );
+    expect(rendered, contains('return ReportModel._('));
+    await _expectAnalyzerClean(rendered);
+  });
+
+  test('keeps nullable nested links null when the payload is absent', () async {
+    const source = '''
+class NodeModel {
+  final NodeModel? child;
+  NodeModel({required this.child});
+  factory NodeModel.fromJson(Map<String, dynamic>? json) => NodeModel(
+        child: json?["child"] == null
+            ? null
+            : NodeModel.fromJson(json?["child"]),
+      );
+}
+''';
+    final parsed = parser.parse(source, 'nullable_nested.dart');
+
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+    final rendered = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+
+    expect(
+      rendered,
+      contains('child: json?["child"] is Map<String, dynamic>'),
+    );
+    expect(rendered, contains('            : null,'));
+    await _expectAnalyzerClean(rendered);
+  });
+
+  test('uses exact top-level function metadata rather than incidental text',
+      () {
+    const source = '''
+const documentation = "reportModelFromJson(";
+
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      ReportModel(id: (json?["id"] ?? "").toString());
+}
+''';
+    final parsed = parser.parse(source, 'incidental_helper_text.dart');
+
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+    final rendered = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+
+    expect('reportModelFromJson('.allMatches(rendered), hasLength(2));
+    expect(
+      RegExp(r'^ReportModel reportModelFromJson\(', multiLine: true)
+          .allMatches(rendered),
+      hasLength(1),
+    );
+  });
+
+  test('does not generate public root helpers for a private-only file', () {
+    const source = '''
+class _PrivateModel {
+  final String id;
+  _PrivateModel({required this.id});
+  factory _PrivateModel.fromJson(Map<String, dynamic>? json) =>
+      _PrivateModel(id: (json?["id"] ?? "").toString());
+}
+''';
+    final parsed = parser.parse(source, 'private_only.dart');
+
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+    final rendered = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+
+    expect(rendered, isNot(contains('_privateModelFromJson')));
+    expect(rendered, isNot(contains('_privateModelToJson')));
+    expect(rendered, contains('class _PrivateModel'));
+  });
+
+  test('renders a derived key in both parsing and serialization', () {
+    const source = '''
+class ReportModel {
+  final String currentPage;
+  ReportModel({required this.currentPage});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      ReportModel(currentPage: "fallback");
+}
+''';
+    final parsed = parser.parse(source, 'derived_key.dart');
+
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+    final rendered = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+
+    expect('"current_page"'.allMatches(rendered), hasLength(2));
+  });
 }
 
 Future<void> _expectAnalyzerClean(String source) async {

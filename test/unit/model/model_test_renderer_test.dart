@@ -117,8 +117,16 @@ class ItemModel {
     );
     expect(rendered, contains("'items': 'not-a-list'"));
     expect(rendered, contains("test('JSON string round trip is stable'"));
-    expect(rendered, contains('reportModelToJson(original)'));
-    expect(rendered, contains('reportModelFromJson(encoded)'));
+    expect(rendered, contains('json.encode(original.toJson())'));
+    expect(
+      rendered,
+      contains(
+        'ReportModel.fromJson(\n'
+        '        json.decode(encoded) as Map<String, dynamic>,',
+      ),
+    );
+    expect(rendered, isNot(contains('reportModelToJson(original)')));
+    expect(rendered, isNot(contains('reportModelFromJson(encoded)')));
     expect(
       syntax.errors,
       isEmpty,
@@ -236,6 +244,128 @@ class ItemModel {
     expect(
       rendered,
       contains('expect(nulls.requiredStatus, isA<Status>());'),
+    );
+  });
+
+  test('roundtrip remains analyzer-clean with preserved list root helpers',
+      () async {
+    final source = File('test/fixtures/models/direct_list_helpers.dart')
+        .readAsStringSync();
+    final parsed = parser.parse(source, 'direct_list_helpers.dart');
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+
+    final modelSource = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+    final testSource = renderer.render(
+      parsed.spec!,
+      modelImport: 'package:fixture/domain/models/report_model.dart',
+    );
+
+    expect(testSource, contains('json.encode(original.toJson())'));
+    expect(testSource, isNot(contains('reportModelFromJson(encoded)')));
+    await _expectAnalyzerCleanPackage(
+      modelSource: modelSource,
+      testSource: testSource,
+    );
+  });
+
+  test('refuses test rendering when no public root exists', () {
+    const source = '''
+class _PrivateModel {
+  final String id;
+  _PrivateModel({required this.id});
+  factory _PrivateModel.fromJson(Map<String, dynamic>? json) =>
+      _PrivateModel(id: (json?["id"] ?? "").toString());
+}
+''';
+    final parsed = parser.parse(source, 'private_only.dart');
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+
+    expect(
+      () => renderer.render(
+        parsed.spec!,
+        modelImport: 'package:fixture/private_only.dart',
+      ),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.message,
+          'message',
+          contains('public root'),
+        ),
+      ),
+    );
+  });
+
+  test('refuses direct-object tests for a preserved envelope factory', () {
+    const source = '''
+class ReportModel {
+  final String id;
+  ReportModel({required this.id});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+    final data = json?["data"];
+    final payload = data is Map<String, dynamic> ? data : const {};
+    return ReportModel(id: (payload["id"] ?? "").toString());
+  }
+}
+''';
+    final parsed = parser.parse(source, 'envelope_factory.dart');
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+
+    expect(
+      () => renderer.render(
+        parsed.spec!,
+        modelImport: 'package:fixture/envelope_factory.dart',
+      ),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.message,
+          'message',
+          contains('direct-object'),
+        ),
+      ),
+    );
+  });
+
+  test('uses the first public class for an analyzer-clean generated test',
+      () async {
+    const source = '''
+class _PrivatePayload {
+  final String id;
+  _PrivatePayload({required this.id});
+  factory _PrivatePayload.fromJson(Map<String, dynamic>? json) =>
+      _PrivatePayload(id: (json?["id"] ?? "").toString());
+}
+
+class ReportModel {
+  final String title;
+  ReportModel({required this.title});
+  factory ReportModel.fromJson(Map<String, dynamic>? json) =>
+      ReportModel(title: (json?["title"] ?? "").toString());
+}
+''';
+    final parsed = parser.parse(source, 'first_public_root.dart');
+    expect(parsed.isSafe, isTrue, reason: parsed.diagnostics.join('\n'));
+
+    final modelSource = const EyeAskModelRenderer().render(
+      parsed.spec!,
+      addCopyWith: false,
+    );
+    final testSource = renderer.render(
+      parsed.spec!,
+      modelImport: 'package:fixture/domain/models/report_model.dart',
+    );
+
+    expect(testSource, contains("group('ReportModel'"));
+    expect(testSource, isNot(contains('_PrivatePayload')));
+    expect(
+      modelSource.indexOf('class _PrivatePayload'),
+      lessThan(modelSource.indexOf('class ReportModel')),
+    );
+    await _expectAnalyzerCleanPackage(
+      modelSource: modelSource,
+      testSource: testSource,
     );
   });
 }

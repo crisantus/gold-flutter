@@ -1,6 +1,7 @@
 import 'model_class_spec.dart';
 import 'model_field_spec.dart';
 import 'model_file_spec.dart';
+import 'model_top_level_function_spec.dart';
 
 /// Renders parsed model metadata using the approved EyeAsk source style.
 final class EyeAskModelRenderer {
@@ -27,26 +28,34 @@ final class EyeAskModelRenderer {
     }
     buffer.writeln();
 
-    final rootPrefix = _lowercaseFirst(spec.rootClassName);
-    final fromJsonHelper = '${rootPrefix}FromJson';
-    final toJsonHelper = '${rootPrefix}ToJson';
     final declarations = spec.preservedTopLevelDeclarations;
-    if (!_declaresHelper(declarations, fromJsonHelper)) {
-      buffer
-        ..writeln('${spec.rootClassName} $fromJsonHelper(String str) =>')
-        ..writeln(
-          '    ${spec.rootClassName}.fromJson('
-          'json.decode(str) as Map<String, dynamic>);',
-        )
-        ..writeln();
-    }
-    if (!_declaresHelper(declarations, toJsonHelper)) {
-      buffer
-        ..writeln(
-          'String $toJsonHelper(${spec.rootClassName} data) => '
-          'json.encode(data.toJson());',
-        )
-        ..writeln();
+    if (spec.rootClassName case final rootClassName?) {
+      final rootPrefix = _lowercaseFirst(rootClassName);
+      final fromJsonHelper = '${rootPrefix}FromJson';
+      final toJsonHelper = '${rootPrefix}ToJson';
+      if (!_declaresHelper(
+        spec,
+        ModelTopLevelFunctionRole.rootDecoder,
+      )) {
+        buffer
+          ..writeln('$rootClassName $fromJsonHelper(String str) =>')
+          ..writeln(
+            '    $rootClassName.fromJson('
+            'json.decode(str) as Map<String, dynamic>);',
+          )
+          ..writeln();
+      }
+      if (!_declaresHelper(
+        spec,
+        ModelTopLevelFunctionRole.rootEncoder,
+      )) {
+        buffer
+          ..writeln(
+            'String $toJsonHelper($rootClassName data) => '
+            'json.encode(data.toJson());',
+          )
+          ..writeln();
+      }
     }
 
     for (final declaration in declarations) {
@@ -99,11 +108,25 @@ void _writeClass(
 
   buffer.writeln();
   _writeConstructor(buffer, model);
+  for (final constructor in model.preservedConstructors) {
+    buffer
+      ..writeln()
+      ..writeln('  $constructor');
+  }
   buffer.writeln();
-  _writeFromJson(buffer, model);
+  if (model.preservedFromJson case final preservedFromJson?) {
+    buffer.writeln('  $preservedFromJson');
+  } else {
+    _writeFromJson(buffer, model);
+  }
   buffer.writeln();
   _writeEmpty(buffer, model);
   buffer.writeln();
+  for (final helper in model.preservedHelperMembers) {
+    buffer
+      ..writeln('  $helper')
+      ..writeln();
+  }
   _writeToJson(
     buffer,
     model,
@@ -211,9 +234,18 @@ void _writeFromJsonField(StringBuffer buffer, ModelFieldSpec field) {
           ..writeln('            DateTime.now(),');
       }
     case ModelFieldKind.nestedModel:
-      buffer.writeln(
-        '        $name: ${field.nestedType}.fromJson(json?[$key]),',
-      );
+      if (field.isNullable) {
+        buffer
+          ..writeln('        $name: json?[$key] is Map<String, dynamic>')
+          ..writeln(
+            '            ? ${field.nestedType}.fromJson(json?[$key])',
+          )
+          ..writeln('            : null,');
+      } else {
+        buffer.writeln(
+          '        $name: ${field.nestedType}.fromJson(json?[$key]),',
+        );
+      }
     case ModelFieldKind.list:
       _writeListFromJson(buffer, field);
     case ModelFieldKind.enumeration:
@@ -371,10 +403,11 @@ bool _isCopyWithMember(String member, String className) {
   return member.contains('$className copyWith(');
 }
 
-bool _declaresHelper(List<String> declarations, String helperName) {
-  return declarations
-      .any((declaration) => declaration.contains('$helperName('));
-}
+bool _declaresHelper(
+  ModelFileSpec spec,
+  ModelTopLevelFunctionRole role,
+) =>
+    spec.topLevelFunctions.any((function) => function.role == role);
 
 String _lowercaseFirst(String value) {
   return '${value[0].toLowerCase()}${value.substring(1)}';

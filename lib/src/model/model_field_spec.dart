@@ -11,12 +11,19 @@ enum ModelFieldKind {
   enumeration,
 }
 
+/// How a model field's JSON key was established.
+enum ModelJsonKeyOrigin {
+  discovered,
+  derived,
+}
+
 /// Immutable source metadata for one declared model field.
 final class ModelFieldSpec {
   ModelFieldSpec({
     required this.name,
     required this.typeSource,
     required this.jsonKey,
+    this.jsonKeyOrigin = ModelJsonKeyOrigin.discovered,
     required this.kind,
     required this.isNullable,
     required this.nestedType,
@@ -43,10 +50,13 @@ final class ModelFieldSpec {
   final String name;
   final String typeSource;
   final String jsonKey;
+  final ModelJsonKeyOrigin jsonKeyOrigin;
   final ModelFieldKind kind;
   final bool isNullable;
   final String? nestedType;
   final int sourceOffset;
+
+  bool get isJsonKeyDerived => jsonKeyOrigin == ModelJsonKeyOrigin.derived;
 
   static bool _requiresNestedType(ModelFieldKind kind) {
     return kind == ModelFieldKind.nestedModel ||

@@ -160,7 +160,7 @@ void main() {
         isA<ModelArrangementException>().having(
           (error) => error.message,
           'message',
-          contains('_PrivateModel'),
+          allOf(contains('public root'), contains('_PrivateModel')),
         ),
       ),
     );
@@ -274,6 +274,49 @@ void main() {
     expect(
       plan.preserved.single.reason,
       'Keep the existing supported copyWith method',
+    );
+  });
+
+  test('reports derived JSON keys as structured preview notices', () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/report_model.dart': _missingKeyModel},
+    );
+    addTearDown(fixture.dispose);
+
+    final plan = await arranger.plan(
+      project: _inspection(fixture),
+      path: 'lib/domain/models/report_model.dart',
+      addCopyWith: false,
+      addTest: false,
+    );
+
+    expect(plan.notices, hasLength(1));
+    expect(plan.notices.single.message, contains('ReportModel.currentPage'));
+    expect(plan.notices.single.message, contains('current_page'));
+    expect(plan.files.single.content, contains('"current_page"'));
+  });
+
+  test('refuses a focused direct-object test for an envelope factory',
+      () async {
+    final fixture = await ProjectFixture.create(
+      files: {'lib/domain/models/report_model.dart': _envelopeFactoryModel},
+    );
+    addTearDown(fixture.dispose);
+
+    expect(
+      () => arranger.plan(
+        project: _inspection(fixture),
+        path: 'lib/domain/models/report_model.dart',
+        addCopyWith: false,
+        addTest: true,
+      ),
+      throwsA(
+        isA<ModelArrangementException>().having(
+          (error) => error.message,
+          'message',
+          contains('direct-object'),
+        ),
+      ),
     );
   });
 
@@ -689,4 +732,28 @@ class ReportModel {
 }
 
 _Status _statusFromJson(dynamic value) => _Status.active;
+''';
+
+const _missingKeyModel = r'''class ReportModel {
+  final String currentPage;
+
+  ReportModel({required this.currentPage});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) => ReportModel(
+        currentPage: "fallback",
+      );
+}
+''';
+
+const _envelopeFactoryModel = r'''class ReportModel {
+  final String id;
+
+  ReportModel({required this.id});
+
+  factory ReportModel.fromJson(Map<String, dynamic>? json) {
+    final data = json?["data"];
+    final payload = data is Map<String, dynamic> ? data : const {};
+    return ReportModel(id: (payload["id"] ?? "").toString());
+  }
+}
 ''';

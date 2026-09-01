@@ -1,6 +1,7 @@
 import 'package:gold_flutter/src/model/model_class_spec.dart';
 import 'package:gold_flutter/src/model/model_file_spec.dart';
 import 'package:gold_flutter/src/model/model_field_spec.dart';
+import 'package:gold_flutter/src/model/model_top_level_function_spec.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -55,11 +56,20 @@ void main() {
     ];
     final imports = ["import 'dart:convert';"];
     final declarations = ['String encodeUser(UserModel value) => value.id;'];
+    final functions = [
+      const ModelTopLevelFunctionSpec(
+        name: 'encodeUser',
+        source: 'String encodeUser(UserModel value) => value.id;',
+        role: ModelTopLevelFunctionRole.other,
+        sourceOffset: 1,
+      ),
+    ];
     final file = ModelFileSpec(
       imports: imports,
       rootClassName: 'UserModel',
       classes: classes,
       preservedTopLevelDeclarations: declarations,
+      topLevelFunctions: functions,
     );
 
     fields.clear();
@@ -68,6 +78,7 @@ void main() {
     classes.clear();
     imports.clear();
     declarations.clear();
+    functions.clear();
 
     expect(file.classes.single.fields.single.name, 'id');
     expect(file.classes.single.annotations, ['@JsonSerializable()']);
@@ -76,12 +87,14 @@ void main() {
     expect(file.preservedTopLevelDeclarations, [
       'String encodeUser(UserModel value) => value.id;',
     ]);
+    expect(file.topLevelFunctions.single.name, 'encodeUser');
     expect(() => file.classes.clear(), throwsUnsupportedError);
     expect(() => file.imports.clear(), throwsUnsupportedError);
     expect(
       () => file.preservedTopLevelDeclarations.clear(),
       throwsUnsupportedError,
     );
+    expect(() => file.topLevelFunctions.clear(), throwsUnsupportedError);
   });
 
   test('model specs reject missing required identifiers and nested metadata',
@@ -202,6 +215,15 @@ void main() {
         preservedTopLevelDeclarations: const [],
       ),
       throwsArgumentError,
+    );
+    expect(
+      ModelFileSpec(
+        imports: const [],
+        rootClassName: null,
+        classes: const [],
+        preservedTopLevelDeclarations: const [],
+      ).rootClassName,
+      isNull,
     );
   });
 }
