@@ -67,6 +67,19 @@ void main() {
       TargetPlatform.android,
       TargetPlatform.ios,
     });
+    expect(InputValidation.platforms('android ios web windows linux'), {
+      TargetPlatform.android,
+      TargetPlatform.ios,
+      TargetPlatform.web,
+      TargetPlatform.windows,
+      TargetPlatform.linux,
+    });
+    expect(InputValidation.platforms('1 3 5'), {
+      TargetPlatform.android,
+      TargetPlatform.web,
+      TargetPlatform.windows,
+    });
+    expect(InputValidation.platforms('all'), TargetPlatform.values.toSet());
     expect(() => InputValidation.platforms(''), throwsFormatException);
     expect(
       () => InputValidation.platforms('android,fuchsia'),

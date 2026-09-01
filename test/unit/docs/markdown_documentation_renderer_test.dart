@@ -39,5 +39,9 @@ void main() {
         isTrue);
     expect(files['docs/gold_flutter/routes.md'], contains('HomeRoute'));
     expect(files['docs/gold_flutter/models.md'], contains('UserModel'));
+    final commands = files['docs/gold_flutter/commands.md']!;
+    expect(commands, contains('gold_flutter help'));
+    expect(commands, contains('Parent folder'));
+    expect(commands, contains('Flutter project root'));
   });
 }

@@ -1,10 +1,9 @@
 import '../config/project_answers.dart';
 import '../validation/input_validation.dart';
+import 'multi_select_prompt.dart';
 import 'prompt_io.dart';
 
-final class UserCancelledException implements Exception {
-  const UserCancelledException();
-}
+export 'prompt_io.dart' show UserCancelledException;
 
 final class AnswersCollector {
   const AnswersCollector({required PromptIO io}) : _io = io;
@@ -28,13 +27,7 @@ final class AnswersCollector {
       defaultApplicationId,
       InputValidation.applicationId,
     );
-    final defaultPlatforms =
-        TargetPlatform.values.map((platform) => platform.name).join(',');
-    final platforms = _validatedWithDefault(
-      'Platforms [$defaultPlatforms]: ',
-      defaultPlatforms,
-      InputValidation.platforms,
-    );
+    final platforms = _collectPlatforms();
     final usesApi = _yesNo('Does this app consume APIs? [y/N]: ', false);
 
     Uri? apiBaseUri;
@@ -76,6 +69,47 @@ final class AnswersCollector {
     }
     return answers;
   }
+
+  Set<TargetPlatform> _collectPlatforms() {
+    final options = TargetPlatform.values
+        .map(
+          (platform) => MultiSelectOption(
+            value: platform.name,
+            label: _platformLabel(platform),
+          ),
+        )
+        .toList(growable: false);
+    if (_io case final MultiSelectPromptIO interactiveIO) {
+      final selected = interactiveIO.selectMany(
+        title: 'Select target platforms',
+        options: options,
+        initiallySelected:
+            TargetPlatform.values.map((platform) => platform.name).toSet(),
+      );
+      if (selected != null) {
+        return InputValidation.platforms(selected.join(','));
+      }
+    }
+
+    _io.writeLine('Select target platforms by number or name:');
+    for (var index = 0; index < options.length; index++) {
+      _io.writeLine('  ${index + 1}. ${options[index].label}');
+    }
+    return _validatedWithDefault(
+      'Platforms [all]: ',
+      'all',
+      InputValidation.platforms,
+    );
+  }
+
+  String _platformLabel(TargetPlatform platform) => switch (platform) {
+        TargetPlatform.android => 'Android',
+        TargetPlatform.ios => 'iOS',
+        TargetPlatform.web => 'Web',
+        TargetPlatform.macos => 'macOS',
+        TargetPlatform.windows => 'Windows',
+        TargetPlatform.linux => 'Linux',
+      };
 
   T _validated<T>(String prompt, T Function(String) validator) {
     while (true) {

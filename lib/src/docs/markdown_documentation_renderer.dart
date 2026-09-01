@@ -88,14 +88,18 @@ final class MarkdownDocumentationRenderer {
 
   static String _commands(ProjectDocumentation snapshot) =>
       '${_header('Gold Flutter Commands', snapshot)}'
-      '```bash\n'
-      'gold_flutter create\n'
-      'gold_flutter doctor\n'
-      'gold_flutter arrange model --path lib/domain/models/example_model.dart\n'
-      'gold_flutter optimize\n'
-      'gold_flutter add amount-formatter\n'
-      'gold_flutter docs\n'
-      '```\n';
+      'Run `gold_flutter` or `gold_flutter help` whenever you need the complete '
+      'command list. Use `gold_flutter help <command>` for detailed options.\n\n'
+      '| Command | Purpose | Run from |\n'
+      '| --- | --- | --- |\n'
+      '| `gold_flutter create` | Create a new Flutter application. | Parent folder that should contain the new project. |\n'
+      '| `gold_flutter doctor` | Check Flutter, Dart, and Git prerequisites. | Anywhere. |\n'
+      '| `gold_flutter arrange model --path lib/domain/models/example_model.dart` | Rewrite a supported model safely. | Flutter project root or any folder inside it. |\n'
+      '| `gold_flutter optimize` | Run the project-health pipeline. | Flutter project root or any folder inside it. |\n'
+      '| `gold_flutter add amount-formatter` | Install the reusable money formatter. | Flutter project root or any folder inside it. |\n'
+      '| `gold_flutter docs` | Generate these project documents. | Flutter project root or any folder inside it. |\n\n'
+      'Running project commands from the Flutter project root is recommended '
+      'for clarity. Gold Flutter searches parent directories for the root.\n';
 
   static String _unknown(ProjectDocumentation snapshot) => snapshot
           .unknownFacts.isEmpty

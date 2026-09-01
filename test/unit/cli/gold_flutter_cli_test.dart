@@ -14,6 +14,45 @@ import '../../support/fake_prompt_io.dart';
 import '../../support/project_fixture.dart';
 
 void main() {
+  test('no command prints a discoverable command catalog with locations',
+      () async {
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(io: io).run([]);
+
+    expect(exitCode, 0);
+    final output = io.output.join('\n');
+    for (final command in [
+      'gold_flutter create',
+      'gold_flutter doctor',
+      'gold_flutter arrange model',
+      'gold_flutter optimize',
+      'gold_flutter add amount-formatter',
+      'gold_flutter docs',
+    ]) {
+      expect(output, contains(command));
+    }
+    expect(output, contains('Parent folder'));
+    expect(output, contains('Flutter project'));
+    expect(output, contains('gold_flutter help <command>'));
+  });
+
+  test('help command prints catalog and nested command guidance', () async {
+    final catalogIO = FakePromptIO([]);
+    expect(await GoldFlutterCli(io: catalogIO).run(['help']), 0);
+    expect(catalogIO.output.join('\n'), contains('gold_flutter create'));
+
+    final modelIO = FakePromptIO([]);
+    expect(
+      await GoldFlutterCli(io: modelIO).run(['help', 'arrange', 'model']),
+      0,
+    );
+    final output = modelIO.output.join('\n');
+    expect(output, contains('Usage: gold_flutter arrange model'));
+    expect(output, contains('Run from:'));
+    expect(output, contains('--path'));
+  });
+
   test('--version prints the current generator version', () async {
     final io = FakePromptIO([]);
 

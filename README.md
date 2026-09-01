@@ -92,6 +92,47 @@ Windows uses:
 %LOCALAPPDATA%\Pub\Cache\bin
 ```
 
+## Find any command
+
+You do not need to memorize Gold Flutter commands. Run either command from any
+folder to see the complete command catalog, what each command does, and where
+it should be used:
+
+```bash
+gold_flutter
+gold_flutter help
+```
+
+For detailed help, place the command name after `help`:
+
+```bash
+gold_flutter help create
+gold_flutter help arrange model
+gold_flutter help optimize
+gold_flutter help add amount-formatter
+gold_flutter help docs
+```
+
+The existing `--help` form is also supported, for example
+`gold_flutter optimize --help`.
+
+## Commands and where to run them
+
+| Command | What it does | Where to run it |
+| --- | --- | --- |
+| `gold_flutter create` | Creates a new Gold-standard Flutter application. | The parent folder that should contain the new project. |
+| `gold_flutter doctor` | Checks Flutter, Dart, and Git. | Anywhere. |
+| `gold_flutter arrange model` | Rewrites a supported model using the defensive EyeAsk conventions. | The Flutter project root or any folder inside it. |
+| `gold_flutter optimize` | Runs dependency resolution, generation, formatting, analysis, tests, and project audits. | The Flutter project root or any folder inside it. |
+| `gold_flutter add amount-formatter` | Adds the reusable, tested money formatter. | The Flutter project root or any folder inside it. |
+| `gold_flutter docs` | Generates owned documentation for the current Flutter application. | The Flutter project root or any folder inside it. |
+
+For project commands, running from the Flutter project root—the folder with
+`pubspec.yaml`—is recommended because paths are easiest to understand there.
+Gold Flutter can also find that root when the command is started from a nested
+folder. It stops with a clear error if no Flutter project exists above the
+current directory.
+
 ## Create a project
 
 Move into the directory that should contain the new project, then run:
@@ -106,7 +147,7 @@ The wizard asks for:
 1. Project display name
 2. Dart `snake_case` project name
 3. Package/application ID, such as `com.company.app`
-4. Target platforms
+4. Target platforms using an interactive checklist
 5. Whether the application consumes APIs
 6. API base URL when API support is enabled
 7. Whether users sign in to protected API endpoints
@@ -117,6 +158,26 @@ The wizard asks for:
 Press Enter to accept a displayed default. Authentication means the backend
 issues a token after sign-in for protected requests; it is not required for a
 public API.
+
+The platform checklist selects every platform by default:
+
+```text
+Select target platforms
+↑/↓ Move • Space Toggle • A All • Enter Confirm • Q Cancel
+
+❯ [✓] Android
+  [✓] iOS
+  [✓] Web
+  [✓] macOS
+  [✓] Windows
+  [✓] Linux
+```
+
+Use the arrow keys to move, Space to toggle one platform, `A` to select or
+clear all platforms, and Enter to confirm. At least one platform is required.
+When interactive keyboard selection is unavailable, Gold Flutter displays a
+numbered fallback. That fallback accepts `1 2 3`, `android ios web`, comma-
+separated names, or `all`.
 
 The generator creates a new child directory. It refuses to overwrite a
 non-empty directory and does not provide a force option.
@@ -333,6 +394,7 @@ Unknown or dynamic facts are reported rather than invented.
 
 Detailed references are under [`docs/commands`](docs/commands/):
 
+- [Command discovery and locations](docs/commands/help.md)
 - [Arrange model](docs/commands/arrange-model.md)
 - [Optimize](docs/commands/optimize.md)
 - [Amount formatter](docs/commands/amount-formatter.md)

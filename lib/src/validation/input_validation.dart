@@ -70,8 +70,11 @@ abstract final class InputValidation {
   }
 
   static Set<TargetPlatform> platforms(String value) {
-    final names = value
-        .split(',')
+    final normalized = value.trim().toLowerCase();
+    if (normalized == 'all') return TargetPlatform.values.toSet();
+
+    final names = normalized
+        .split(RegExp(r'[,\s]+'))
         .map((item) => item.trim().toLowerCase())
         .where((item) => item.isNotEmpty)
         .toList(growable: false);
@@ -84,10 +87,16 @@ abstract final class InputValidation {
     };
     final selected = <TargetPlatform>{};
     for (final name in names) {
-      final platform = available[name];
+      final numericIndex = int.tryParse(name);
+      final platform = numericIndex != null &&
+              numericIndex >= 1 &&
+              numericIndex <= TargetPlatform.values.length
+          ? TargetPlatform.values[numericIndex - 1]
+          : available[name];
       if (platform == null) {
         throw FormatException(
-          'Unknown platform "$name". Use ${available.keys.join(', ')}.',
+          'Unknown platform "$name". Use numbers 1-${TargetPlatform.values.length} '
+          'or ${available.keys.join(', ')}.',
         );
       }
       selected.add(platform);

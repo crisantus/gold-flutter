@@ -8,6 +8,11 @@
 - Add `gold_flutter add amount-formatter` with configurable `intl` output.
 - Add `gold_flutter docs` with SHA-256 generated-file ownership.
 - Add complete command references and local-main prerelease guidance.
+- Add an interactive keyboard checklist for target-platform selection.
+- Accept numbered, space-separated, comma-separated, and `all` platform input
+  when the checklist is unavailable.
+- Add `gold_flutter help`, detailed command discovery, working-directory
+  guidance, and clearer public/generated documentation.
 
 ## 0.1.0 - 2026-08-31
 

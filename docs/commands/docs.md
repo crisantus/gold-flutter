@@ -1,5 +1,8 @@
 # Generate docs
 
+Run this command from the Flutter project root or any folder inside it. The
+generated files are written under the detected root's `docs/gold_flutter/`.
+
 ```bash
 gold_flutter docs --dry-run
 gold_flutter docs --yes

@@ -1,5 +1,8 @@
 # Optimize
 
+Run this command from the Flutter project root or any folder inside it. Gold
+Flutter finds the project root by searching for its Flutter `pubspec.yaml`.
+
 ```bash
 gold_flutter optimize --dry-run
 gold_flutter optimize --yes

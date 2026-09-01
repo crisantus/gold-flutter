@@ -48,45 +48,19 @@ final class GoldFlutterCli {
 
   Future<int> run(List<String> arguments) async {
     final parser = _buildParser();
-    if (arguments.isNotEmpty &&
-        arguments.first == 'create' &&
-        arguments.any((argument) => argument == '--help' || argument == '-h')) {
-      _io.writeLine('Usage: gold_flutter create [options]');
-      _io.writeLine(parser.commands['create']!.usage);
+    if (arguments.isEmpty) {
+      _writeHelp();
       return 0;
     }
-    if (arguments.length >= 2 &&
-        arguments[0] == 'arrange' &&
-        arguments[1] == 'model' &&
-        arguments.any((argument) => argument == '--help' || argument == '-h')) {
-      final modelParser = parser.commands['arrange']!.commands['model']!;
-      _io.writeLine('Usage: gold_flutter arrange model [options]');
-      _io.writeLine(modelParser.usage);
-      return 0;
+    if (arguments.first == 'help') {
+      return _writeCommandHelp(parser, arguments.skip(1).toList());
     }
-    if (arguments.isNotEmpty &&
-        arguments.first == 'docs' &&
-        arguments.any((argument) => argument == '--help' || argument == '-h')) {
-      _io.writeLine('Usage: gold_flutter docs [options]');
-      _io.writeLine(parser.commands['docs']!.usage);
-      return 0;
-    }
-    if (arguments.isNotEmpty &&
-        arguments.first == 'optimize' &&
-        arguments.any((argument) => argument == '--help' || argument == '-h')) {
-      _io.writeLine('Usage: gold_flutter optimize [options]');
-      _io.writeLine(parser.commands['optimize']!.usage);
-      return 0;
-    }
-    if (arguments.length >= 2 &&
-        arguments[0] == 'add' &&
-        arguments[1] == 'amount-formatter' &&
-        arguments.any((argument) => argument == '--help' || argument == '-h')) {
-      final amountParser =
-          parser.commands['add']!.commands['amount-formatter']!;
-      _io.writeLine('Usage: gold_flutter add amount-formatter [options]');
-      _io.writeLine(amountParser.usage);
-      return 0;
+    if (arguments.any((argument) => argument == '--help' || argument == '-h')) {
+      final path = arguments
+          .takeWhile((argument) => argument != '--help' && argument != '-h')
+          .takeWhile((argument) => !argument.startsWith('-'))
+          .toList();
+      return _writeCommandHelp(parser, path);
     }
     late ArgResults results;
     try {
@@ -101,8 +75,8 @@ final class GoldFlutterCli {
       _io.writeLine('gold_flutter $version');
       return 0;
     }
-    if (results['help'] as bool || arguments.isEmpty) {
-      _writeHelp(parser);
+    if (results['help'] as bool) {
+      _writeHelp();
       return 0;
     }
 
@@ -631,13 +605,122 @@ final class GoldFlutterCli {
     return parser;
   }
 
-  void _writeHelp(ArgParser parser) {
+  void _writeHelp() {
     _io.writeLine('Gold Flutter $version');
-    _io.writeLine('Create a Riverpod + AutoRoute Flutter project.');
+    _io.writeLine('Create and maintain Riverpod + AutoRoute Flutter projects.');
     _io.writeLine('');
-    _io.writeLine(
-      'Usage: gold_flutter <create|doctor|arrange|optimize|add|docs> [options]',
+    _io.writeLine('Commands');
+    _writeCatalogEntry(
+      command: 'gold_flutter create',
+      description: 'Create a complete new Flutter application.',
+      location: 'Parent folder that should contain the project.',
     );
-    _io.writeLine(parser.usage);
+    _writeCatalogEntry(
+      command: 'gold_flutter doctor',
+      description: 'Check Flutter, Dart, and Git prerequisites.',
+      location: 'Anywhere.',
+    );
+    _writeCatalogEntry(
+      command: 'gold_flutter arrange model',
+      description: 'Rewrite a supported model using defensive conventions.',
+      location: 'Flutter project root or any folder inside it.',
+    );
+    _writeCatalogEntry(
+      command: 'gold_flutter optimize',
+      description: 'Run formatting, analysis, tests, and project audits.',
+      location: 'Flutter project root or any folder inside it.',
+    );
+    _writeCatalogEntry(
+      command: 'gold_flutter add amount-formatter',
+      description: 'Install the tested reusable money formatter.',
+      location: 'Flutter project root or any folder inside it.',
+    );
+    _writeCatalogEntry(
+      command: 'gold_flutter docs',
+      description: 'Generate project documentation safely.',
+      location: 'Flutter project root or any folder inside it.',
+    );
+    _io.writeLine('');
+    _io.writeLine('Need details? Run: gold_flutter help <command>');
+    _io.writeLine('Example: gold_flutter help arrange model');
+  }
+
+  void _writeCatalogEntry({
+    required String command,
+    required String description,
+    required String location,
+  }) {
+    _io.writeLine('  $command');
+    _io.writeLine('    $description');
+    _io.writeLine('    Run from: $location');
+  }
+
+  int _writeCommandHelp(ArgParser parser, List<String> path) {
+    if (path.isEmpty) {
+      _writeHelp();
+      return 0;
+    }
+
+    final topic = path.join(' ');
+    late final String usage;
+    late final String description;
+    late final String location;
+    late final String example;
+    late final ArgParser commandParser;
+    switch (topic) {
+      case 'create':
+        usage = 'gold_flutter create [options]';
+        description = 'Create a complete Riverpod + AutoRoute Flutter app.';
+        location = 'Parent folder that should contain the new project.';
+        example = 'gold_flutter create';
+        commandParser = parser.commands['create']!;
+      case 'doctor':
+        usage = 'gold_flutter doctor';
+        description = 'Check whether Flutter, Dart, and Git are ready.';
+        location = 'Anywhere.';
+        example = 'gold_flutter doctor';
+        commandParser = parser.commands['doctor']!;
+      case 'arrange model':
+        usage = 'gold_flutter arrange model [options]';
+        description = 'Safely rewrite a supported Dart model file.';
+        location = 'Flutter project root or any folder inside it.';
+        example = 'gold_flutter arrange model --path '
+            'lib/domain/models/report_model.dart --dry-run';
+        commandParser = parser.commands['arrange']!.commands['model']!;
+      case 'optimize':
+        usage = 'gold_flutter optimize [options]';
+        description = 'Run the transparent project-health pipeline.';
+        location = 'Flutter project root or any folder inside it.';
+        example = 'gold_flutter optimize --dry-run';
+        commandParser = parser.commands['optimize']!;
+      case 'add amount-formatter':
+        usage = 'gold_flutter add amount-formatter [options]';
+        description = 'Install and test the reusable money formatter.';
+        location = 'Flutter project root or any folder inside it.';
+        example = 'gold_flutter add amount-formatter --dry-run';
+        commandParser = parser.commands['add']!.commands['amount-formatter']!;
+      case 'docs':
+        usage = 'gold_flutter docs [options]';
+        description = 'Generate safe, owned project documentation.';
+        location = 'Flutter project root or any folder inside it.';
+        example = 'gold_flutter docs --dry-run';
+        commandParser = parser.commands['docs']!;
+      default:
+        _io.writeLine('Unknown help topic "$topic".');
+        _io.writeLine('Run gold_flutter to see every command.');
+        return 64;
+    }
+
+    _io.writeLine('Usage: $usage');
+    _io.writeLine(description);
+    _io.writeLine('Run from: $location');
+    _io.writeLine('Example: $example');
+    final options = commandParser.usage.trim();
+    if (options.isNotEmpty) {
+      _io.writeLine('');
+      _io.writeLine('Options:');
+      _io.writeLine(options);
+    }
+    return 0;
   }
 }

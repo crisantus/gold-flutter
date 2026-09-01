@@ -1,5 +1,8 @@
 # Amount formatter
 
+Run this command from the Flutter project root or any folder inside it. Use
+`--dry-run` first when the project may already contain a formatter.
+
 ```bash
 gold_flutter add amount-formatter --yes
 ```
