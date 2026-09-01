@@ -16,5 +16,7 @@ dependencies:
   yaml: ^3.1.3
 
 dev_dependencies:
-  lints: ^6.0.0
+  # js 0.7.2 requires Dart 3.7; keep the test graph at this package's floor.
+  js: 0.7.1
+  lints: 5.0.0
   test: ^1.25.15

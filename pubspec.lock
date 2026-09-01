@@ -130,21 +130,21 @@ packages:
     source: hosted
     version: "1.1.0"
   js:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: js
-      sha256: "53385261521cc4a0c4658fd0ad07a7d14591cf8fc33abbceae306ddb974888dc"
+      sha256: c1b2e9b5ea78c45e1a0788d29606ba27dc5f71f019f32ca5140f61ef071838cf
       url: "https://pub.dev"
     source: hosted
-    version: "0.7.2"
+    version: "0.7.1"
   lints:
     dependency: "direct dev"
     description:
       name: lints
-      sha256: "12f842a479589fea194fe5c5a3095abc7be0c1f2ddfa9a0e76aed1dbd26a87df"
+      sha256: "3315600f3fb3b135be672bf4a178c55f274bebe368325ae18462c89ac1e3b413"
       url: "https://pub.dev"
     source: hosted
-    version: "6.1.0"
+    version: "5.0.0"
   logging:
     dependency: transitive
     description:
@@ -394,4 +394,4 @@ packages:
     source: hosted
     version: "3.1.4"
 sdks:
-  dart: ">=3.8.0 <4.0.0"
+  dart: ">=3.5.0 <4.0.0"
