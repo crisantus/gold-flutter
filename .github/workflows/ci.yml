@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/initial-generator]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
           cache: true
 
       - name: Resolve generator dependencies
-        run: dart pub get
+        run: dart pub get --enforce-lockfile
 
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed bin lib test
@@ -34,6 +34,9 @@ jobs:
 
       - name: Test generator
         run: dart test
+
+      - name: Activate local generator
+        run: dart pub global activate --source path .
 
       - name: Generate and verify base application
         run: >-
@@ -61,13 +64,34 @@ jobs:
           --yes
           --output-directory "$RUNNER_TEMP"
 
+      - name: Exercise every assistant command
+        working-directory: ${{ runner.temp }}/ci_base
+        run: |
+          mkdir -p lib/domain/models
+          cp "$GITHUB_WORKSPACE/tool/ci/example_model.dart" lib/domain/models/example_model.dart
+          gold_flutter arrange model --path lib/domain/models/example_model.dart --yes
+          gold_flutter add amount-formatter --yes
+          gold_flutter docs --yes
+          gold_flutter optimize --yes
+          flutter analyze
+          flutter test
+
   windows-installer-syntax:
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve locked dependencies
+        run: dart pub get --enforce-lockfile
 
       - name: Parse PowerShell installer
         shell: pwsh
@@ -83,3 +107,9 @@ jobs:
             $errors | Format-List
             exit 1
           }
+
+      - name: Run platform-neutral safety tests
+        run: >-
+          dart test
+          test/unit/change/change_plan_test.dart
+          test/unit/docs/documentation_manifest_test.dart

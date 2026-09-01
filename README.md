@@ -292,6 +292,52 @@ owned test. Invalid or unsafe arrangement input returns exit code 64 without a
 transaction. Gold Flutter never uses a broad Git reset and does not restore
 unrelated files or external tool caches.
 
+## Optimize an existing project
+
+```bash
+gold_flutter optimize --dry-run
+gold_flutter optimize --yes
+```
+
+`optimize` is a transparent project-health pipeline, not automatic runtime
+performance tuning. It runs dependency resolution, conditional build runner,
+Dart formatting, analysis, and tests in order, then reports missing assets and
+stale generated files. It stops on the first failed tool and restores its
+snapshotted source roots. Downloaded package-cache entries are not removed.
+
+## Add the amount formatter
+
+Install the Nigerian defaults (`en_NG`, `₦`, two decimal digits, grouping, and
+`₦ •••••` for hidden balances):
+
+```bash
+gold_flutter add amount-formatter --yes
+```
+
+Customize it with `--locale`, `--symbol`, `--decimal-digits`, `--no-grouping`,
+and `--hidden-text`. The command owns
+`lib/core/utils/money_formatter.dart` and its focused test, adds `intl` when
+missing, and refuses unowned conflicts. Use it as
+`Text(MoneyFormatter.format(1200))`.
+
+## Generate project documentation
+
+```bash
+gold_flutter docs --dry-run
+gold_flutter docs --yes
+```
+
+The command writes seven Markdown files under `docs/gold_flutter/`. Its
+SHA-256 manifest updates Gold-owned content while preserving user edits.
+Unknown or dynamic facts are reported rather than invented.
+
+Detailed references are under [`docs/commands`](docs/commands/):
+
+- [Arrange model](docs/commands/arrange-model.md)
+- [Optimize](docs/commands/optimize.md)
+- [Amount formatter](docs/commands/amount-formatter.md)
+- [Generate docs](docs/commands/docs.md)
+
 ## Update
 
 After improvements are pushed to this repository, install the newest version

@@ -26,6 +26,8 @@ Run these checks before proposing a change:
 dart format --output=none --set-exit-if-changed bin lib test
 dart analyze
 dart test
+bash -n scripts/install.sh
+ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml')"
 ```
 
 Changes to generated Flutter code must also generate and verify the supported
@@ -39,6 +41,10 @@ project variants with `flutter analyze` and `flutter test`.
    contributor branch.
 4. Push only after local verification and explicit approval; wait for CI.
 5. Tag a verified release only after separate release approval.
+
+Linux CI runs the full suite and exercises every assistant command in a
+disposable Flutter application. Windows parses the installer and runs
+platform-neutral safety tests.
 
 Users receive the latest version by running the activation command from the
 README again.

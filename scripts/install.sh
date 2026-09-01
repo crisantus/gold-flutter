@@ -13,7 +13,7 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
-dart pub global activate --source git "$repository_url"
+dart pub global activate --source git --git-ref main "$repository_url"
 
 echo
 echo "Gold Flutter is installed."
@@ -21,4 +21,3 @@ echo "Run: gold_flutter doctor"
 echo "Then move to a parent folder and run: gold_flutter create"
 echo
 echo 'If gold_flutter is not found, add $HOME/.pub-cache/bin to PATH.'
-
