@@ -8,6 +8,8 @@ import '../change/change_transaction.dart';
 import '../config/project_answers.dart';
 import '../generator/project_generator.dart';
 import '../model/model_arranger.dart';
+import '../optimize/project_auditor.dart';
+import '../optimize/project_optimizer.dart';
 import '../process/process_executor.dart';
 import '../project/project_inspector.dart';
 import '../prompts/answers_collector.dart';
@@ -22,12 +24,14 @@ final class GoldFlutterCli {
     Directory? currentDirectory,
     ModelArranger? modelArranger,
     ChangeTransaction? changeTransaction,
+    ProjectOptimizer? projectOptimizer,
   })  : _io = io,
         _generator = generator ?? DefaultProjectGenerator.standard(),
         _currentDirectory = currentDirectory ?? Directory.current,
         _modelArranger = modelArranger ?? const ModelArranger(),
         _changeTransaction = changeTransaction ??
-            ChangeTransaction(executor: const LocalProcessExecutor());
+            ChangeTransaction(executor: const LocalProcessExecutor()),
+        _projectOptimizer = projectOptimizer ?? const ProjectOptimizer();
 
   static const version = '0.2.0-dev';
 
@@ -36,6 +40,7 @@ final class GoldFlutterCli {
   final Directory _currentDirectory;
   final ModelArranger _modelArranger;
   final ChangeTransaction _changeTransaction;
+  final ProjectOptimizer _projectOptimizer;
 
   Future<int> run(List<String> arguments) async {
     final parser = _buildParser();
@@ -53,6 +58,13 @@ final class GoldFlutterCli {
       final modelParser = parser.commands['arrange']!.commands['model']!;
       _io.writeLine('Usage: gold_flutter arrange model [options]');
       _io.writeLine(modelParser.usage);
+      return 0;
+    }
+    if (arguments.isNotEmpty &&
+        arguments.first == 'optimize' &&
+        arguments.any((argument) => argument == '--help' || argument == '-h')) {
+      _io.writeLine('Usage: gold_flutter optimize [options]');
+      _io.writeLine(parser.commands['optimize']!.usage);
       return 0;
     }
     late ArgResults results;
@@ -86,9 +98,84 @@ final class GoldFlutterCli {
         return _runDoctor();
       case 'arrange':
         return _runArrange(command);
+      case 'optimize':
+        return _runOptimize(command);
       default:
         _io.writeLine('Unknown command: ${command.name}');
         return 64;
+    }
+  }
+
+  Future<int> _runOptimize(ArgResults command) async {
+    try {
+      final project = await const ProjectInspector().inspect(_currentDirectory);
+      if (project.isDirty) {
+        _io.writeLine('Warning: the project has uncommitted Git changes.');
+      }
+      final plan = await _projectOptimizer.plan(project);
+      final presenter = ChangePlanPresenter(io: _io)..print(plan);
+      final apply = presenter.confirm(
+        assumeYes: command['yes'] as bool,
+        dryRun: command['dry-run'] as bool,
+      );
+      if (!apply) {
+        return 0;
+      }
+
+      final report = await _projectOptimizer.run(plan);
+      final output = report.output.trimRight();
+      if (output.isNotEmpty) {
+        _io.writeLine(output);
+      }
+      if (!report.transaction.success) {
+        _io.writeLine('Project optimization failed.');
+        _io.writeLine(
+          report.restored
+              ? 'Restoration status: completed. Project files were restored.'
+              : 'Restoration status: incomplete or not required; inspect the '
+                  'reported stages before retrying.',
+        );
+        return 1;
+      }
+
+      _io.writeLine('Completed stages');
+      for (final stage in report.stages) {
+        _io.writeLine('  ${stage.command}');
+      }
+      final audit = report.audit!;
+      if (audit.missingAssets.isNotEmpty) {
+        _io.writeLine('Missing assets');
+        for (final asset in audit.missingAssets) {
+          _io.writeLine('  $asset');
+        }
+      }
+      if (audit.staleGeneratedMarkers.isNotEmpty) {
+        _io.writeLine('Stale generated files');
+        for (final path in audit.staleGeneratedMarkers) {
+          _io.writeLine('  $path');
+        }
+      }
+      if (audit.unsupportedMarkers.isNotEmpty) {
+        _io.writeLine('Unsupported source checks');
+        for (final path in audit.unsupportedMarkers) {
+          _io.writeLine('  $path');
+        }
+      }
+      _io.writeLine(
+        report.success
+            ? 'Project health checks passed.'
+            : 'Project health checks found issues.',
+      );
+      return report.success ? 0 : 1;
+    } on ProjectInspectionException catch (error) {
+      _io.writeLine(error.message);
+      return 64;
+    } on ProjectAuditException catch (error) {
+      _io.writeLine('Project audit failed: ${error.message}');
+      return 1;
+    } on Exception catch (error) {
+      _io.writeLine('Project optimization failed: $error');
+      return 1;
     }
   }
 
@@ -322,6 +409,18 @@ final class GoldFlutterCli {
       ..addFlag('sample-api', negatable: true)
       ..addFlag('yes', abbr: 'y', negatable: false);
     parser.addCommand('doctor');
+    parser.addCommand('optimize')
+      ..addFlag(
+        'dry-run',
+        negatable: false,
+        help: 'Preview detected health stages without running them.',
+      )
+      ..addFlag(
+        'yes',
+        abbr: 'y',
+        negatable: false,
+        help: 'Run the detected stages without confirmation.',
+      );
     parser.addCommand('arrange').addCommand('model')
       ..addOption(
         'path',
@@ -356,7 +455,9 @@ final class GoldFlutterCli {
     _io.writeLine('Gold Flutter $version');
     _io.writeLine('Create a Riverpod + AutoRoute Flutter project.');
     _io.writeLine('');
-    _io.writeLine('Usage: gold_flutter <create|doctor|arrange> [options]');
+    _io.writeLine(
+      'Usage: gold_flutter <create|doctor|arrange|optimize> [options]',
+    );
     _io.writeLine(parser.usage);
   }
 }

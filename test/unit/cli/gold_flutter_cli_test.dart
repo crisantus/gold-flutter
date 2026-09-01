@@ -5,6 +5,7 @@ import 'package:gold_flutter/src/change/change_transaction.dart';
 import 'package:gold_flutter/src/cli/gold_flutter_cli.dart';
 import 'package:gold_flutter/src/config/project_answers.dart';
 import 'package:gold_flutter/src/generator/project_generator.dart';
+import 'package:gold_flutter/src/optimize/project_optimizer.dart';
 import 'package:gold_flutter/src/process/process_executor.dart';
 import 'package:test/test.dart';
 
@@ -96,6 +97,42 @@ void main() {
     ]) {
       expect(output, contains(option));
     }
+  });
+
+  test('optimize --help lists dry-run and yes options', () async {
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(io: io).run(['optimize', '--help']);
+
+    expect(exitCode, 0);
+    expect(io.prompts, isEmpty);
+    expect(io.output.join('\n'), contains('--dry-run'));
+    expect(io.output.join('\n'), contains('--yes'));
+  });
+
+  test('optimize dry-run previews stages without executing them', () async {
+    final fixture = await ProjectFixture.create(files: {
+      'lib/main.dart': 'void main() {}\n',
+      'test/widget_test.dart': '',
+    });
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor(const {});
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(
+      io: io,
+      currentDirectory: fixture.root,
+      projectOptimizer: ProjectOptimizer(
+        transaction: ChangeTransaction(executor: executor),
+      ),
+    ).run(['optimize', '--dry-run']);
+
+    expect(exitCode, 0);
+    expect(executor.calls, isEmpty);
+    final output = io.output.join('\n');
+    expect(output, contains('flutter'));
+    expect(output, contains('pub'));
+    expect(output, contains('No files have been changed.'));
   });
 
   test('arrange model without --path returns usage exit code 64', () async {
