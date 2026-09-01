@@ -2,6 +2,9 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 
+import '../amount/amount_formatter_answers.dart';
+import '../amount/amount_formatter_answers_collector.dart';
+import '../amount/amount_formatter_installer.dart';
 import '../change/change_plan_presenter.dart';
 import '../change/change_report.dart';
 import '../change/change_transaction.dart';
@@ -67,6 +70,16 @@ final class GoldFlutterCli {
       _io.writeLine(parser.commands['optimize']!.usage);
       return 0;
     }
+    if (arguments.length >= 2 &&
+        arguments[0] == 'add' &&
+        arguments[1] == 'amount-formatter' &&
+        arguments.any((argument) => argument == '--help' || argument == '-h')) {
+      final amountParser =
+          parser.commands['add']!.commands['amount-formatter']!;
+      _io.writeLine('Usage: gold_flutter add amount-formatter [options]');
+      _io.writeLine(amountParser.usage);
+      return 0;
+    }
     late ArgResults results;
     try {
       results = parser.parse(arguments);
@@ -100,10 +113,91 @@ final class GoldFlutterCli {
         return _runArrange(command);
       case 'optimize':
         return _runOptimize(command);
+      case 'add':
+        return _runAdd(command);
       default:
         _io.writeLine('Unknown command: ${command.name}');
         return 64;
     }
+  }
+
+  Future<int> _runAdd(ArgResults command) async {
+    final nested = command.command;
+    if (nested == null || nested.name != 'amount-formatter') {
+      _io.writeLine('Usage: gold_flutter add amount-formatter [options]');
+      return 64;
+    }
+    return _runAddAmountFormatter(nested);
+  }
+
+  Future<int> _runAddAmountFormatter(ArgResults command) async {
+    try {
+      final answers = command['yes'] as bool
+          ? _amountAnswersFromFlags(command)
+          : AmountFormatterAnswersCollector(io: _io).collect();
+      final project = await const ProjectInspector().inspect(_currentDirectory);
+      if (project.isDirty) {
+        _io.writeLine('Warning: the project has uncommitted Git changes.');
+      }
+      final plan =
+          await const AmountFormatterInstaller().plan(project, answers);
+      final presenter = ChangePlanPresenter(io: _io)..print(plan);
+      final apply = presenter.confirm(
+        assumeYes: command['yes'] as bool,
+        dryRun: command['dry-run'] as bool,
+      );
+      if (!apply) {
+        return 0;
+      }
+      final report = await _changeTransaction.execute(plan);
+      final output = report.output.trimRight();
+      if (output.isNotEmpty) {
+        _io.writeLine(output);
+      }
+      if (!report.success) {
+        _io.writeLine('Amount formatter installation failed.');
+        _io.writeLine(
+          report.restored
+              ? 'Restoration status: completed. Changes were restored.'
+              : 'Restoration status: incomplete or not required; inspect the '
+                  'planned files before retrying.',
+        );
+        return 1;
+      }
+      presenter.printReport(report, preserved: plan.preserved);
+      _io.writeLine('Amount formatter installed.');
+      return 0;
+    } on AmountFormatterConflictException catch (error) {
+      _io.writeLine(error.message);
+      return 64;
+    } on ProjectInspectionException catch (error) {
+      _io.writeLine(error.message);
+      return 64;
+    } on FormatException catch (error) {
+      _io.writeLine(error.message);
+      return 64;
+    } on ArgumentError catch (error) {
+      _io.writeLine(error.message);
+      return 64;
+    } on Exception catch (error) {
+      _io.writeLine('Amount formatter installation failed: $error');
+      return 1;
+    }
+  }
+
+  AmountFormatterAnswers _amountAnswersFromFlags(ArgResults command) {
+    final digitsText = command['decimal-digits'] as String;
+    final digits = int.tryParse(digitsText);
+    if (digits == null) {
+      throw const FormatException('--decimal-digits must be an integer.');
+    }
+    return AmountFormatterAnswers(
+      locale: command['locale'] as String,
+      symbol: command['symbol'] as String,
+      decimalDigits: digits,
+      useGrouping: command['grouping'] as bool,
+      hiddenText: command['hidden-text'] as String,
+    );
   }
 
   Future<int> _runOptimize(ArgResults command) async {
@@ -421,6 +515,28 @@ final class GoldFlutterCli {
         negatable: false,
         help: 'Run the detected stages without confirmation.',
       );
+    parser.addCommand('add').addCommand('amount-formatter')
+      ..addOption('locale', defaultsTo: 'en_NG')
+      ..addOption('symbol', defaultsTo: '₦')
+      ..addOption('decimal-digits', defaultsTo: '2')
+      ..addFlag(
+        'grouping',
+        defaultsTo: true,
+        negatable: true,
+        help: 'Display grouped thousands.',
+      )
+      ..addOption('hidden-text', defaultsTo: '₦ •••••')
+      ..addFlag(
+        'dry-run',
+        negatable: false,
+        help: 'Preview generated files and commands without applying them.',
+      )
+      ..addFlag(
+        'yes',
+        abbr: 'y',
+        negatable: false,
+        help: 'Use flag values and apply without confirmation.',
+      );
     parser.addCommand('arrange').addCommand('model')
       ..addOption(
         'path',
@@ -456,7 +572,7 @@ final class GoldFlutterCli {
     _io.writeLine('Create a Riverpod + AutoRoute Flutter project.');
     _io.writeLine('');
     _io.writeLine(
-      'Usage: gold_flutter <create|doctor|arrange|optimize> [options]',
+      'Usage: gold_flutter <create|doctor|arrange|optimize|add> [options]',
     );
     _io.writeLine(parser.usage);
   }

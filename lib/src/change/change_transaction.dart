@@ -549,6 +549,9 @@ final class ChangeTransaction {
               command.executable == 'flutter') &&
           _startsWith(command.arguments, const ['pub', 'get'])) {
         _validatePubGet(plan, command.arguments);
+      } else if (command.executable == 'flutter' &&
+          _startsWith(command.arguments, const ['pub', 'add'])) {
+        _validatePubAdd(plan, command.arguments);
       } else if (command.executable != 'dart' &&
           command.executable != 'flutter') {
         throw StateError(
@@ -575,7 +578,8 @@ final class ChangeTransaction {
           );
     }
     return command.executable == 'flutter' &&
-        _startsWith(command.arguments, const ['pub', 'get']);
+        (_startsWith(command.arguments, const ['pub', 'get']) ||
+            _startsWith(command.arguments, const ['pub', 'add']));
   }
 
   static void _validateDartFormat(
@@ -644,6 +648,15 @@ final class ChangeTransaction {
       if (!supportedOptions.contains(argument)) {
         throw StateError('Unsupported pub get option: $argument');
       }
+    }
+    _requireCoverage(plan, const ['pubspec.yaml', 'pubspec.lock']);
+  }
+
+  static void _validatePubAdd(ChangePlan plan, List<String> arguments) {
+    if (arguments.length != 3 || arguments[2] != 'intl') {
+      throw StateError(
+        'Unsupported flutter pub add command: ${arguments.join(' ')}',
+      );
     }
     _requireCoverage(plan, const ['pubspec.yaml', 'pubspec.lock']);
   }

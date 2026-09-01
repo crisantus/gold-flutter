@@ -135,6 +135,56 @@ void main() {
     expect(output, contains('No files have been changed.'));
   });
 
+  test('add amount-formatter help lists every configuration option', () async {
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(io: io).run([
+      'add',
+      'amount-formatter',
+      '--help',
+    ]);
+
+    expect(exitCode, 0);
+    for (final option in [
+      '--locale',
+      '--symbol',
+      '--decimal-digits',
+      '--[no-]grouping',
+      '--hidden-text',
+      '--dry-run',
+      '--yes',
+    ]) {
+      expect(io.output.join('\n'), contains(option));
+    }
+  });
+
+  test('add amount-formatter yes uses Nigerian defaults without prompting',
+      () async {
+    final fixture = await ProjectFixture.create();
+    addTearDown(fixture.dispose);
+    final executor = FakeProcessExecutor.success({
+      'flutter pub add intl': 'added',
+      'dart format lib/core/utils/money_formatter.dart '
+          'test/core/utils/money_formatter_test.dart': 'formatted',
+      'flutter analyze': 'clean',
+      'flutter test test/core/utils/money_formatter_test.dart': 'passed',
+    });
+    final io = FakePromptIO([]);
+
+    final exitCode = await GoldFlutterCli(
+      io: io,
+      currentDirectory: fixture.root,
+      changeTransaction: ChangeTransaction(executor: executor),
+    ).run(['add', 'amount-formatter', '--yes']);
+
+    expect(exitCode, 0);
+    expect(io.prompts, isEmpty);
+    expect(
+      await fixture.file('lib/core/utils/money_formatter.dart').readAsString(),
+      allOf(contains("'en_NG'"), contains("'₦'")),
+    );
+  });
+
   test('arrange model without --path returns usage exit code 64', () async {
     final io = FakePromptIO([]);
 
