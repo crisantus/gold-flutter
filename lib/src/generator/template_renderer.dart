@@ -43,23 +43,12 @@ final class TemplateRenderer implements ProjectTemplateRenderer {
       '{{sample_route_import}}': answers.includesSampleApi
           ? "import '../../core/route/app_router.dart';"
           : '',
-      '{{sample_action_widget}}': answers.includesSampleApi
-          ? '''
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              key: const Key('sample-api-action'),
-              onPressed: _handleOpenSampleApi,
-              icon: const Icon(Icons.cloud_outlined),
-              label: const Text('Open sample API'),
-            ),'''
-          : '',
-      '{{sample_action_handler}}': answers.includesSampleApi
-          ? '''
-
-  void _handleOpenSampleApi() {
-    context.router.push(const SampleItemsRoute());
-  }'''
-          : '',
+      '{{home_header_widget}}': answers.includesSampleApi
+          ? '''                  HomeCounterHeader(
+                    onOpenSampleApi: () =>
+                        context.router.push(const SampleItemsRoute()),
+                  ),'''
+          : '                  const HomeCounterHeader(),',
     };
 
     final templates = <String, String>{

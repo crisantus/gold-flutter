@@ -249,58 +249,33 @@ class AppSurfaceCard extends StatelessWidget {
   }
 }
 ''',
-  'lib/presentation/screens/home_screen.dart':
-      r'''import 'package:auto_route/auto_route.dart';
-import 'package:flutter/material.dart';
+  'lib/presentation/widgets/home/home_counter_header.dart':
+      r'''import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../business/starter/starter_viewmodel.dart';
-{{sample_route_import}}
-import '../widgets/app_surface_card.dart';
+import '../../../business/starter/starter_viewmodel.dart';
 
-@RoutePage()
-class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({super.key});
+class HomeCounterHeader extends ConsumerWidget {
+  const HomeCounterHeader({
+    this.onOpenSampleApi,
+    super.key,
+  });
+
+  final VoidCallback? onOpenSampleApi;
 
   @override
-  ConsumerState<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends ConsumerState<HomeScreen> {
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final count = ref.watch(starterViewModelProvider);
-    return Scaffold(
-      appBar: AppBar(title: const Text('{{display_name_dart}}')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 920),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildHeader(count),
-                  const SizedBox(height: 24),
-                  _buildFoundationGrid(),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader(int count) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Your foundation is ready', style: Theme.of(context).textTheme.headlineSmall),
+            Text(
+              'Your foundation is ready',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
             const SizedBox(height: 10),
             const Text(
               'Riverpod, AutoRoute, themes, layers, assets, and focused tests are connected.',
@@ -308,18 +283,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             const SizedBox(height: 22),
             FilledButton.icon(
               key: const Key('starter-action'),
-              onPressed: _handleStarterAction,
+              onPressed: () =>
+                  ref.read(starterViewModelProvider.notifier).increment(),
               icon: const Icon(Icons.auto_awesome),
               label: Text('Try Riverpod · $count'),
             ),
-{{sample_action_widget}}
+            if (onOpenSampleApi != null) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: const Key('sample-api-action'),
+                onPressed: onOpenSampleApi,
+                icon: const Icon(Icons.cloud_outlined),
+                label: const Text('Open sample API'),
+              ),
+            ],
           ],
         ),
       ),
     );
   }
+}
+''',
+  'lib/presentation/widgets/home/home_foundation_grid.dart':
+      r'''import 'package:flutter/material.dart';
 
-  Widget _buildFoundationGrid() {
+import '../app_surface_card.dart';
+
+class HomeFoundationGrid extends StatelessWidget {
+  const HomeFoundationGrid({super.key});
+
+  @override
+  Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth >= 700
@@ -350,10 +344,44 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       },
     );
   }
+}
+''',
+  'lib/presentation/screens/home_screen.dart':
+      r'''import 'package:auto_route/auto_route.dart';
+import 'package:flutter/material.dart';
 
-  void _handleStarterAction() {
-    ref.read(starterViewModelProvider.notifier).increment();
-  }{{sample_action_handler}}
+{{sample_route_import}}
+import '../widgets/home/home_counter_header.dart';
+import '../widgets/home/home_foundation_grid.dart';
+
+@RoutePage()
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('{{display_name_dart}}')),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 920),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+{{home_header_widget}}
+                  const SizedBox(height: 24),
+                  const HomeFoundationGrid(),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 ''',
   'test/widget_test.dart': r'''import 'package:flutter/material.dart';
@@ -467,11 +495,40 @@ introduce GetIt/global provider containers.
 
 Use Riverpod for state and dependency injection. Prefer
 `Notifier<AsyncValue<T>>` for explicit fetch and mutation actions; use
-`AsyncNotifier<T>` when async construction is genuinely the state. Widgets use
-`ref.watch` to render, `ref.read(provider.notifier)` for actions, and
-`ref.listen` for one-time UI effects. Preserve usable data during refresh and
-keep independent mutations independent. Do not add Provider, Bloc,
-`StateNotifier`, or ChangeNotifier for new state.
+`AsyncNotifier<T>` when async construction is genuinely the state. Preserve
+usable data during refresh and keep independent mutations independent. Do not
+add `package:provider`, Bloc, `StateNotifier`, ChangeNotifier, GetIt, or global
+provider containers for new state; Riverpod's own `Provider` remains the normal
+choice for synchronous state and derivations.
+
+Subscribe to state at the smallest widget boundary that renders it:
+
+- Keep only genuinely page-wide rendered state in a screen-level `build()`.
+  Put secondary provider subscriptions in focused `Consumer` or
+  `ConsumerWidget` sections so unrelated changes do not rebuild the page. The
+  smallest-boundary rule takes precedence over labeling a watch "primary."
+  Prefer one cohesive provider-aware section over making every leaf widget a
+  consumer; keep fields and other visual leaves provider-agnostic.
+- Use `ref.watch` for rendered state and `select` when a widget renders only a
+  stable slice. Use event-time `ref.read(provider)` for the latest value needed
+  only by a tap, submission, sheet, or navigation action;
+  `ref.read(provider.notifier)` invokes mutations.
+- Use `ref.listen` for one-time UI effects such as snackbars, dialogs, and
+  navigation. Do not use listeners as a second rendering mechanism.
+- Do not hide provider subscriptions in ordinary `_build...` helper methods.
+  Pass the required value explicitly or extract a focused provider-owning
+  widget.
+- Move shared or nontrivial repeated filtering, lookup, combination, or
+  projection into a derived provider; a cheap one-off presentation transform
+  may remain local. Prefer `Provider.autoDispose.family` for a temporary
+  synchronous parameterized derivation when retained caching is not required,
+  and use equality-safe parameters. Auto-disposal and retention apply to each
+  argument-specific provider instance; retain an instance only when the
+  product explicitly needs its cache after listeners disappear. Choose the
+  corresponding asynchronous Riverpod provider when the derivation is async.
+- Keep forms, controllers, `PageView`, and other stateful UI outside unrelated
+  rebuild scopes. Do not mechanically count watches: colocate multiple watches
+  only when the same smallest UI region genuinely renders all of them.
 
 ## Routing and UI
 
@@ -480,8 +537,25 @@ the single Riverpod-owned `AppRouter`. Regenerate `*.gr.dart`; never edit it by
 hand or navigate with raw route-name strings.
 
 Build screens from semantic theme values and focused reusable primitives.
-Screen `build()` methods should read as orchestration; extract purposeful
-`_build...` sections and `_handle...` actions when they clarify ownership.
+Screen `build()` methods should stay short and read as orchestration. Move a
+substantial feature-specific `_Field`, `_Section`, `_Card`, or similar widget
+to `lib/presentation/widgets/<feature>/`, or the nearest existing feature-local
+`widgets/` directory. Because imported Dart declarations cannot remain
+library-private, give each extracted widget a descriptive public name such as
+`GuideProfileField`, not a generic `Field`. Keep small one-off layout fragments
+private when extraction would only add indirection. For example,
+`screens/home_screen.dart` may extract `_SummarySection` to
+`widgets/home/home_summary_section.dart` as `HomeSummarySection`.
+
+Pure presentation widgets receive typed values and callbacks. A widget should
+consume a provider directly only when that widget owns the responsibility for
+reacting to it. Keep `_handle...` actions near the state or navigation they
+coordinate, and convert a `ConsumerStatefulWidget` to a simpler widget only
+when it no longer owns controllers, lifecycle work, or local mutable state. Use
+`ConsumerWidget` while the screen still calls `ref.watch`, `ref.read`, or
+`ref.listen`; use `StatelessWidget` only after all Riverpod access has moved
+into descendants.
+
 Cover loading, data, empty, initial error, retained-data refresh, disabled,
 light/dark, landscape, wide, enlarged-text, and long-copy states as applicable.
 Do not add a global spacing class or renamed equivalent—use local `Padding`,
@@ -495,8 +569,26 @@ response-envelope parsing. Repositories own connectivity, cache, retry, and
 typed failure mapping.
 
 Add the smallest focused behavioral test for each change. Use provider
-overrides and small fakes rather than mocking internals. Format changed Dart
-files, regenerate routes when needed, run focused tests, then `flutter analyze`
-and the broader suite for shared architecture or UI changes.
+overrides, real production widgets, and small fakes rather than mocking
+internals. For provider-scope refactors, add rebuild-isolation tests that prove
+the affected mounted region responds when its selected value changes while an
+unrelated mounted region does not; also test event-time reads and family
+disposal when those behaviors matter. A zero rebuild count after a widget
+unmounts is not evidence. When a rebuild rule is project-wide, prefer an
+analyzer/AST architecture test over source-text grep.
+
+Format changed Dart files, regenerate routes when needed, run focused tests,
+then `flutter analyze` and the broader suite for shared architecture or UI
+changes.
+
+## Common mistakes
+
+- Moving UI into helper methods but leaving all watches at screen level.
+- Watching state only because an action might need it later.
+- Recomputing the same filtered collection in several widget builds.
+- Extracting every tiny fragment or placing feature-only widgets in a global
+  shared folder.
+- Claiming performance gains from cleaner ownership without measuring on a
+  physical device in profile mode.
 ''',
 };

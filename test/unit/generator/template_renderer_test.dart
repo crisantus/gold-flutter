@@ -46,6 +46,79 @@ void main() {
     );
   });
 
+  test('generated skill renders clean screen and Riverpod guidance smoke test',
+      () async {
+    final root = await Directory.systemTemp.createTemp('gold_template_test_');
+    addTearDown(() => root.delete(recursive: true));
+
+    await const TemplateRenderer().render(
+      projectRoot: root,
+      answers: baseAnswers,
+    );
+
+    final skill = File(
+      p.join(
+        root.path,
+        '.agents/skills/gold-flutter-development/SKILL.md',
+      ),
+    ).readAsStringSync();
+
+    expect(
+      skill,
+      allOf([
+        contains('smallest widget boundary that renders it'),
+        contains('smallest-boundary rule takes precedence'),
+        contains('`lib/presentation/widgets/<feature>/`'),
+        matches(RegExp(r'descriptive public\s+name')),
+        contains('secondary provider subscriptions'),
+        contains('event-time `ref.read(provider)`'),
+        contains('`select`'),
+        contains('`Provider.autoDispose.family`'),
+        contains('`package:provider`'),
+        contains('rebuild-isolation tests'),
+      ]),
+    );
+  });
+
+  test('starter screen models focused Riverpod and widget ownership', () async {
+    final root = await Directory.systemTemp.createTemp('gold_template_test_');
+    addTearDown(() => root.delete(recursive: true));
+
+    await const TemplateRenderer().render(
+      projectRoot: root,
+      answers: baseAnswers,
+    );
+
+    final screen = File(
+      p.join(root.path, 'lib/presentation/screens/home_screen.dart'),
+    ).readAsStringSync();
+    final header = File(
+      p.join(
+        root.path,
+        'lib/presentation/widgets/home/home_counter_header.dart',
+      ),
+    ).readAsStringSync();
+    final grid = File(
+      p.join(
+        root.path,
+        'lib/presentation/widgets/home/home_foundation_grid.dart',
+      ),
+    ).readAsStringSync();
+
+    expect(screen, contains('class HomeScreen extends StatelessWidget'));
+    expect(screen, isNot(contains('ref.watch')));
+    expect(screen, contains('const HomeCounterHeader()'));
+    expect(screen, contains('const HomeFoundationGrid()'));
+    expect(header, contains('class HomeCounterHeader extends ConsumerWidget'));
+    expect(header, contains('ref.watch(starterViewModelProvider)'));
+    expect(
+      header,
+      contains('ref.read(starterViewModelProvider.notifier).increment()'),
+    );
+    expect(grid, contains('class HomeFoundationGrid extends StatelessWidget'));
+    expect(grid, isNot(contains('flutter_riverpod')));
+  });
+
   test('replaces project tokens in rendered files', () async {
     final root = await Directory.systemTemp.createTemp('gold_template_test_');
     addTearDown(() => root.delete(recursive: true));
@@ -164,14 +237,27 @@ void main() {
     ]) {
       expect(File(p.join(root.path, path)).existsSync(), isTrue, reason: path);
     }
+    final homeScreen =
+        File(p.join(root.path, 'lib/presentation/screens/home_screen.dart'))
+            .readAsStringSync();
     expect(
-      File(p.join(root.path, 'lib/presentation/screens/home_screen.dart'))
-          .readAsStringSync(),
+      homeScreen,
       allOf(
         contains("import '../../core/route/app_router.dart';"),
         isNot(contains("import '../../core/route/app_router.gr.dart';")),
         contains('SampleItemsRoute'),
         contains('context.router.push(const SampleItemsRoute())'),
+      ),
+    );
+    expect(
+      File(
+        p.join(
+          root.path,
+          'lib/presentation/widgets/home/home_counter_header.dart',
+        ),
+      ).readAsStringSync(),
+      allOf(
+        contains("Key('sample-api-action')"),
         contains('Open sample API'),
       ),
     );
