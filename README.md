@@ -18,7 +18,8 @@ Every generated application includes:
 - `MaterialApp.router`, light and dark themes, and a responsive starter screen
 - `business`, `core`, `data`, `domain`, and `presentation` layers
 - `assets/fonts`, `assets/icons`, `assets/images`, and `assets/svgs`
-- focused starter tests and project-local agent instructions
+- focused starter tests, project-local agent instructions, and Flutter style
+  and performance guides
 - explicit local layout spacing—no global spacing class
 
 When API support is selected it can also generate Dio services, connectivity,

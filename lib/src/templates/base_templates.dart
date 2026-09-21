@@ -443,8 +443,8 @@ Read `AGENTS.md` before using Codex on this project.
 
 ## Mandatory project skill
 
-For every task that creates, changes, refactors, debugs, tests, or reviews
-Flutter/Dart code, load and follow `$gold-flutter-development` from
+For every task that creates, changes, refactors, debugs, tests, profiles, or
+reviews Flutter/Dart code, load and follow `$gold-flutter-development` from
 `.agents/skills/gold-flutter-development/SKILL.md` before inspecting or editing
 that code.
 
@@ -459,7 +459,7 @@ that code.
 ''',
   '.agents/skills/gold-flutter-development/SKILL.md': r'''---
 name: gold-flutter-development
-description: Use when creating, changing, refactoring, debugging, testing, or reviewing Flutter and Dart code in this generated application.
+description: Use when creating, changing, refactoring, debugging, testing, profiling, or reviewing Flutter and Dart code in this generated application, including state, repositories, API models, UI, localization, offline behavior, performance, and platform integration.
 ---
 
 # Gold Flutter Development
@@ -467,6 +467,16 @@ description: Use when creating, changing, refactoring, debugging, testing, or re
 Continue this project in the same architecture and visual language established
 by the generator. Inspect the nearest analogous production and test files
 before editing.
+
+## Required context
+
+Read the applicable `AGENTS.md` instructions and the generated
+`docs/development/FLUTTER_STYLE_GUIDE.md` and
+`docs/development/FLUTTER_PERFORMANCE_GUIDE.md` completely before changing
+Flutter code. Follow the project's existing patterns and the user's
+requirements when they are more specific than this skill. Check which optional
+features and dependencies this project actually uses before applying the
+guidance below.
 
 ## Architecture contract
 
@@ -561,12 +571,37 @@ light/dark, landscape, wide, enlarged-text, and long-copy states as applicable.
 Do not add a global spacing class or renamed equivalent—use local `Padding`,
 `EdgeInsets`, `SizedBox`, and component-owned dimensions.
 
+For landscape, split-screen, tablet, and enlarged-text layout issues, use
+`$flutter-landscape-responsiveness` when it is installed. Preserve portrait
+behavior, size typography from stable device constraints rather than landscape
+width, and let text-bearing content grow instead of hiding overflow. Flutter
+applies the ambient text scaler during layout; do not apply it again when
+building theme font sizes. Verify the affected screen in portrait, landscape,
+and enlarged-text viewports.
+
 ## Data and tests
 
 API models use immutable fields, defensive parsing, `empty`, `fromJson`,
 `toJson`, list parsing, and `copyWith` where applicable. Models own standard
 response-envelope parsing. Repositories own connectivity, cache, retry, and
 typed failure mapping.
+
+If the project enables localization, use its localization API for new
+app-authored visible copy and update every supported locale together. Do not
+translate user-generated content, dynamic names, or backend-returned content.
+If a translation has not been reviewed by a fluent speaker, flag it as pending
+review before release.
+
+For network-backed flows, keep cache, connectivity, and retry decisions in the
+repository. Deduplicate identical in-flight reads, prevent stale responses
+from replacing newer data, bound caches, and preserve usable data during
+refresh where the flow needs it. Queue or retry sensitive mutations only when
+the backend provides explicit idempotency support.
+
+Give each request, subscription, controller, timer, animation, media resource,
+and WebView one lifecycle owner. Dispose of it from that owner and ignore late
+callbacks after disposal. Use lazy, stable-keyed collections for lists that
+can grow, and avoid repeated work in item builders.
 
 Add the smallest focused behavioral test for each change. Use provider
 overrides, real production widgets, and small fakes rather than mocking
@@ -577,9 +612,13 @@ disposal when those behaviors matter. A zero rebuild count after a widget
 unmounts is not evidence. When a rebuild rule is project-wide, prefer an
 analyzer/AST architecture test over source-text grep.
 
-Format changed Dart files, regenerate routes when needed, run focused tests,
-then `flutter analyze` and the broader suite for shared architecture or UI
-changes.
+Format changed Dart files, regenerate routes and localizations when needed,
+run focused tests, then `flutter analyze` and the broader suite for shared
+architecture or UI changes. Test relevant loading, error, offline, lifecycle,
+orientation, and accessibility states. For performance claims, compare the
+same named scenario in profile mode on supported physical devices; report
+missing device evidence instead of inferring it from debug runs or simulators.
+Report checks that could not run and why.
 
 ## Common mistakes
 
@@ -590,5 +629,9 @@ changes.
   shared folder.
 - Claiming performance gains from cleaner ownership without measuring on a
   physical device in profile mode.
+- Starting requests or controllers in `build()`, leaving subscriptions alive,
+  or letting late responses overwrite newer state.
+- Hard-coding visible copy after localization has been enabled, or changing
+  only one locale.
 ''',
 };

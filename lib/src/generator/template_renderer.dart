@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../config/dependency_manifest.dart';
 import '../config/project_answers.dart';
 import '../format/text_escaping.dart';
+import '../templates/agent_guide_templates.dart';
 import '../templates/api_templates.dart';
 import '../templates/auth_templates.dart';
 import '../templates/base_templates.dart';
@@ -53,6 +54,7 @@ final class TemplateRenderer implements ProjectTemplateRenderer {
 
     final templates = <String, String>{
       ...baseTemplates,
+      ...agentGuideTemplates,
       if (answers.usesApi) ...apiTemplates,
       if (answers.usesAuthentication) ...authTemplates,
       if (answers.usesRefreshTokens) ...refreshTokenTemplates,

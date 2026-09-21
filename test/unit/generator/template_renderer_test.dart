@@ -33,9 +33,28 @@ void main() {
           '.agents/skills/gold-flutter-development/SKILL.md',
         ),
       ).readAsStringSync(),
-      allOf(contains('Riverpod 3'),
-          contains('Do not add a global spacing class')),
+      allOf(
+          contains('Riverpod 3'),
+          contains('Do not add a global spacing class'),
+          contains('localization'),
+          contains('idempotency support'),
+          contains('supported physical devices'),
+          contains('docs/development/FLUTTER_STYLE_GUIDE.md'),
+          contains('docs/development/FLUTTER_PERFORMANCE_GUIDE.md')),
     );
+    expect(
+      File(p.join(root.path, 'AGENTS.md')).readAsStringSync(),
+      contains('.agents/skills/gold-flutter-development/SKILL.md'),
+    );
+    for (final guide in [
+      'docs/development/FLUTTER_STYLE_GUIDE.md',
+      'docs/development/FLUTTER_PERFORMANCE_GUIDE.md',
+    ]) {
+      expect(
+        File(p.join(root.path, guide)).readAsStringSync(),
+        File(guide).readAsStringSync(),
+      );
+    }
     expect(
       Directory(p.join(root.path, 'assets/images')).existsSync(),
       isTrue,
