@@ -1,191 +1,143 @@
 # Gold Flutter
 
-`gold_flutter` is an opinionated, interactive Flutter project generator built
-around Riverpod 3, AutoRoute, layered data boundaries, consistent themes,
-responsive UI, assets, useful examples, and focused tests.
-
-It creates the foundation I want at the beginning of a real Flutter project,
-while keeping API, authentication, refresh-token, and sample-feature code
-optional.
-
-## What it generates
-
-Every generated application includes:
-
-- the standard Flutter platform projects
-- Riverpod 3 with a root `ProviderScope`
-- AutoRoute with generated, typed routes
-- `MaterialApp.router`, light and dark themes, and a responsive starter screen
-- `business`, `core`, `data`, `domain`, and `presentation` layers
-- `assets/fonts`, `assets/icons`, `assets/images`, and `assets/svgs`
-- focused starter tests, project-local agent instructions, and Flutter style
-  and performance guides
-- explicit local layout spacing—no global spacing class
-
-When API support is selected it can also generate Dio services, connectivity,
-typed exceptions and failures, abstract/concrete remote sources, repositories,
-Riverpod ViewModels, secure authentication, coordinated refresh tokens, and a
-complete sample API feature.
-
-## Prerequisites
-
-Install the following first:
-
-1. [Flutter](https://docs.flutter.dev/get-started/install)
-2. Git
-3. Dart SDK `>=3.5.0 <4.0.0`, which is included with Flutter
-
-Confirm Flutter is available:
-
-```bash
-flutter doctor
-dart --version
-git --version
-```
+Gold Flutter creates a Flutter app with Riverpod 3, AutoRoute, light and dark
+themes, and a ready-to-use folder structure. Choose whether to include API
+support, token authentication, refresh tokens, and a sample API feature.
 
 ## Install
 
-Because this repository is public, installation does not require a GitHub
-account, SSH key, or access token:
+You need [Flutter](https://docs.flutter.dev/get-started/install), its bundled
+Dart SDK (`>=3.5.0 <4.0.0`), and Git installed and available in your terminal.
 
 ```bash
 dart pub global activate --source git --git-ref main \
   https://github.com/crisantus/gold-flutter.git
 ```
 
-The explicit `--git-ref main` installs the current public `main` branch and is
-also the recommended way to test unreleased command changes from `main`.
-
-On macOS or Linux, the repository also provides a convenience installer:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/crisantus/gold-flutter/main/scripts/install.sh
-bash install.sh
-```
-
-Review downloaded scripts before running them. The direct Dart activation
-command above remains the simplest transparent installation method.
-
-On Windows PowerShell, the equivalent convenience installer is:
-
-```powershell
-Invoke-WebRequest `
-  -Uri https://raw.githubusercontent.com/crisantus/gold-flutter/main/scripts/install.ps1 `
-  -OutFile install.ps1
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
-
-If your terminal cannot find `gold_flutter`, add Dart's global executable
-directory to your `PATH`.
-
-macOS and Linux:
-
-```bash
-export PATH="$PATH:$HOME/.pub-cache/bin"
-```
-
-Add that line to `~/.zshrc`, `~/.bashrc`, or the startup file used by your
-shell so it remains available after restarting the terminal.
-
-Windows uses:
-
-```text
-%LOCALAPPDATA%\Pub\Cache\bin
-```
-
-## Find any command
-
-You do not need to memorize Gold Flutter commands. Run either command from any
-folder to see the complete command catalog, what each command does, and where
-it should be used:
-
-```bash
-gold_flutter
-gold_flutter help
-```
-
-For detailed help, place the command name after `help`:
-
-```bash
-gold_flutter help create
-gold_flutter help arrange model
-gold_flutter help optimize
-gold_flutter help add amount-formatter
-gold_flutter help docs
-```
-
-The existing `--help` form is also supported, for example
-`gold_flutter optimize --help`.
-
-## Commands and where to run them
-
-| Command | What it does | Where to run it |
-| --- | --- | --- |
-| `gold_flutter create` | Creates a new Gold-standard Flutter application. | The parent folder that should contain the new project. |
-| `gold_flutter doctor` | Checks Flutter, Dart, and Git. | Anywhere. |
-| `gold_flutter arrange model` | Rewrites a supported model using the defensive EyeAsk conventions. | The Flutter project root or any folder inside it. |
-| `gold_flutter optimize` | Runs dependency resolution, generation, formatting, analysis, tests, and project audits. | The Flutter project root or any folder inside it. |
-| `gold_flutter add amount-formatter` | Adds the reusable, tested money formatter. | The Flutter project root or any folder inside it. |
-| `gold_flutter docs` | Generates owned documentation for the current Flutter application. | The Flutter project root or any folder inside it. |
-
-For project commands, running from the Flutter project root—the folder with
-`pubspec.yaml`—is recommended because paths are easiest to understand there.
-Gold Flutter can also find that root when the command is started from a nested
-folder. It stops with a clear error if no Flutter project exists above the
-current directory.
-
-## Create a project
-
-Move into the directory that should contain the new project, then run:
+Check that everything is ready:
 
 ```bash
 gold_flutter doctor
+```
+
+If your terminal says `gold_flutter` is not found, see [PATH setup](#path-setup).
+
+## Create and run your first app
+
+Run this in the folder where you want to create your project:
+
+```bash
 gold_flutter create
 ```
 
-The wizard asks for:
+The wizard asks for your app name, Dart project name (for example, `my_app`),
+application ID (for example, `com.company.myapp`), and target platforms. It then
+asks whether you need APIs, authentication, refresh tokens, and a sample API
+feature. API questions appear only when the relevant feature is enabled.
 
-1. Project display name
-2. Dart `snake_case` project name
-3. Package/application ID, such as `com.company.app`
-4. Target platforms using an interactive checklist
-5. Whether the application consumes APIs
-6. API base URL when API support is enabled
-7. Whether users sign in to protected API endpoints
-8. Whether the backend issues refresh tokens
-9. Whether to include a complete sample API feature
-10. Final confirmation
+Press Enter to accept a default. In the platform checklist, use the arrow keys
+to move, Space to toggle a platform, and Enter to confirm. All platforms are
+selected by default; select at least one. If the checklist is unavailable, use
+the numbered fallback or enter platform names such as `android ios web`.
 
-Press Enter to accept a displayed default. Authentication means the backend
-issues a token after sign-in for protected requests; it is not required for a
-public API.
+Gold Flutter creates a child folder using your Dart project name, installs
+dependencies, generates routes, formats the code, and runs analysis and tests.
+It refuses to overwrite a non-empty folder.
 
-The platform checklist selects every platform by default:
+When creation finishes, enter that folder and run your app:
 
-```text
-Select target platforms
-↑/↓ Move • Space Toggle • A All • Enter Confirm • Q Cancel
-
-❯ [✓] Android
-  [✓] iOS
-  [✓] Web
-  [✓] macOS
-  [✓] Windows
-  [✓] Linux
+```bash
+cd my_app
+flutter run
 ```
 
-Use the arrow keys to move, Space to toggle one platform, `A` to select or
-clear all platforms, and Enter to confirm. At least one platform is required.
-When interactive keyboard selection is unavailable, Gold Flutter displays a
-numbered fallback. That fallback accepts `1 2 3`, `android ios web`, comma-
-separated names, or `all`.
+Replace `my_app` with the project name you chose. Flutter lists available
+devices when a target needs to be selected.
 
-The generator creates a new child directory. It refuses to overwrite a
-non-empty directory and does not provide a force option.
+## What you get
 
-## Non-interactive example
+Every app includes:
 
-For scripts or CI:
+- Riverpod 3 for state management and dependency injection.
+- AutoRoute for typed navigation and `MaterialApp.router`.
+- Light and dark themes, a responsive starter screen, and starter tests.
+- Folders for fonts, icons, images, and SVGs.
+- Project instructions in `AGENTS.md`, a local Flutter development skill, and
+  style and performance guides.
+
+The generated code follows this structure:
+
+| Folder | Purpose |
+| --- | --- |
+| `lib/presentation/` | Screens and widgets |
+| `lib/business/` | Riverpod ViewModels and feature actions |
+| `lib/domain/` | Models and request payloads |
+| `lib/data/` | Repositories and remote/local sources |
+| `lib/core/` | Routing, themes, networking, and shared utilities |
+| `assets/` | Fonts, icons, images, and SVGs |
+
+### Optional features
+
+| Choice | What it adds |
+| --- | --- |
+| API support | Dio, connectivity checks, typed errors, and network services |
+| Authentication | Bearer-token requests, token storage using `shared_preferences`, and session cleanup |
+| Refresh tokens | Coordinated token refresh and one retry after an authenticated request returns 401 |
+| Sample API | An example model, remote source, repository, ViewModel, and screen |
+
+Authentication requires API support. Refresh tokens require authentication.
+Public APIs can use API support without authentication.
+
+Token storage uses `SharedPreferencesAsync`. Preferences are not encrypted;
+session cleanup removes only the access and refresh tokens and preserves other
+preferences. See the [shared_preferences documentation](https://pub.dev/packages/shared_preferences).
+
+## Useful commands
+
+Run `gold_flutter help` to see all commands, or `gold_flutter help create` for
+help with a specific command.
+
+| Command | What it does | Where to run it |
+| --- | --- | --- |
+| `gold_flutter create` | Creates a new app | Parent folder for the new project |
+| `gold_flutter doctor` | Checks Flutter, Dart, and Git | Anywhere |
+| `gold_flutter arrange model` | Standardizes an existing model's parsing and member order | Inside a Flutter project |
+| `gold_flutter optimize` | Runs dependency resolution, code generation, formatting, analysis, tests, and audits | Inside a Flutter project |
+| `gold_flutter add amount-formatter` | Adds a tested money-formatting utility | Inside a Flutter project |
+| `gold_flutter docs` | Generates project documentation | Inside a Flutter project |
+
+For commands that change an existing project, run from its root (the folder
+with `pubspec.yaml`) or a folder inside it. Use `--dry-run` to preview changes;
+use `--yes` to apply without an interactive confirmation.
+
+```bash
+# Preview a model update.
+gold_flutter arrange model --path lib/domain/models/report_model.dart --dry-run
+
+# Preview the project checks.
+gold_flutter optimize --dry-run
+
+# Add the money formatter with Nigerian defaults (en_NG, ₦).
+gold_flutter add amount-formatter --yes
+
+# Preview generated documentation.
+gold_flutter docs --dry-run
+```
+
+`optimize` checks project health; it does not automatically tune runtime
+performance. The amount formatter is available as
+`MoneyFormatter.format(1200)` in `lib/core/utils/money_formatter.dart`.
+
+Detailed options and limits:
+[command help](docs/commands/help.md),
+[model arranger](docs/commands/arrange-model.md),
+[optimize](docs/commands/optimize.md),
+[amount formatter](docs/commands/amount-formatter.md), and
+[project docs](docs/commands/docs.md).
+
+## Create an app from a script
+
+Use `--yes` with explicit options to skip the wizard:
 
 ```bash
 gold_flutter create \
@@ -202,262 +154,57 @@ gold_flutter create \
 ```
 
 Use `--no-api`, `--no-auth`, `--no-refresh-tokens`, or `--no-sample-api` to
-disable a choice explicitly.
+explicitly disable a feature.
 
-## Arrange an existing model
+## PATH setup
 
-Run the model arranger from anywhere inside the target Flutter project. The
-model path must resolve to an existing Dart file under
-`lib/domain/models/` in that project.
-
-Preview the complete file and command plan without changing files or consuming
-confirmation input:
+On macOS or Linux, add this line to your shell startup file (`~/.zshrc` or
+`~/.bashrc`), then restart the terminal:
 
 ```bash
-gold_flutter arrange model \
-  --path lib/domain/models/report_model.dart \
-  --dry-run
+export PATH="$PATH:$HOME/.pub-cache/bin"
 ```
 
-Omit `--dry-run` to preview the same plan and confirm it interactively, or use
-`--yes` for a reviewed script or CI job:
+On Windows, add this directory to your user `Path`, then restart the terminal:
 
-```bash
-gold_flutter arrange model \
-  --path lib/domain/models/report_model.dart \
-  --yes
+```text
+%LOCALAPPDATA%\Pub\Cache\bin
 ```
 
-Add `copyWith` to eligible classes and create or update the focused,
-Gold-owned model test with:
+Optional convenience installers are available for
+[macOS/Linux](scripts/install.sh) and [Windows PowerShell](scripts/install.ps1).
+Review a downloaded script before running it.
 
-```bash
-gold_flutter arrange model \
-  --path lib/domain/models/report_model.dart \
-  --copy-with \
-  --test \
-  --yes
-```
+## Update or uninstall
 
-The command options are:
+To update, run the installation command again. Updates apply to newly generated
+apps. To change an existing app, run the relevant project command and review
+its plan.
 
-- `--path <file>`: required project-relative or contained absolute path to the
-  model file.
-- `--copy-with`: generate `copyWith` for eligible classes that do not already
-  define a supported instance `copyWith`; existing supported methods are
-  preserved.
-- `--test`: generate or update the mirrored focused test under `test/` and run
-  that test after analysis.
-- `--dry-run`: print the plan and exit without starting the transaction,
-  writing files, running formatter/analysis/tests, or reading confirmation.
-- `--yes`, `-y`: apply the displayed plan without reading confirmation.
-- `--help`, `-h`: display the model-arranger options.
-
-### Supported model shapes
-
-The arranger uses the Dart analyzer and rewrites a complete file only when all
-of it is understood. The first public class is the root model; private classes
-that appear before it keep their source order. Supported fields are:
-
-- `String`, `int`, `double`, `num`, and `bool`, including nullable forms;
-- `DateTime` and `DateTime?`;
-- nested model objects;
-- `List<T>` where `T` is a supported primitive, `DateTime`, or a model class
-  declared in the same file;
-- enum fields that call a preservable converter named for the field, such as
-  `_statusFromJson`.
-
-Nested model fields and model-list elements must be declared in the same Dart
-file. Imported/external model fields, imported/external model lists, and enum
-lists are not arranged in this release because the file does not contain enough
-structural proof to regenerate them safely. Map-shaped fields, unsupported
-generics, non-final fields, invalid Dart, ambiguous constructors, and
-conflicting structural members also cause a full-file refusal with no write.
-
-Snake-case, camelCase, and escaped string-literal JSON keys discovered in
-`fromJson` are preserved. When a field has no discoverable key, the arranger
-derives an acronym-aware snake-case key, such as `currentPage` to
-`current_page`, and shows that decision in the preview. Multiple conflicting
-keys for one field remain ambiguous and cause a full-file refusal.
-
-Existing direct-list, `data`, and `data.items` response handling is preserved,
-including safe local-variable and top-level-helper aliases. The arranger never
-invents an envelope. It refuses aliases that are reassigned, cyclic, ambiguous,
-or hidden inside a nested function or closure because those scopes cannot be
-rewritten safely.
-
-The canonical output orders final fields, the required constructor,
-`fromJson`, `empty`, `toJson`, an existing or requested `copyWith`, and then
-preserved custom members. Imports, annotations, documentation, safe top-level
-declarations, custom getters, custom methods, and supported enum converters
-are preserved.
-
-### EyeAsk conversions
-
-Primitive input is normalized through `toString()` before typed parsing. The
-generated scalar behavior is exactly:
-
-```dart
-value: (json?["value"] ?? "").toString(),
-count: int.tryParse((json?["count"] ?? "").toString()) ?? 0,
-price: double.tryParse((json?["price"] ?? "").toString()) ?? 0.0,
-total: num.tryParse((json?["total"] ?? "").toString()) ?? 0,
-enabled: json?["enabled"] is bool
-    ? json!["enabled"] as bool
-    : (json?["enabled"] ?? "").toString() == "true",
-createdAt: DateTime.tryParse(
-      (json?["created_at"] ?? "").toString(),
-    ) ??
-    DateTime.now(),
-deletedAt: DateTime.tryParse(
-  (json?["deleted_at"] ?? "").toString(),
-),
-```
-
-Nullable `int`, `double`, `num`, and `DateTime` values omit the non-null
-fallback, so failed parsing returns `null`. String and boolean parsing still
-produce `""` and `false` for missing or null input. Booleans preserve an actual
-JSON boolean; other values are true only when `toString()` equals lowercase
-`"true"` exactly. A field declared as `String`, including a date-looking
-string, stays a string.
-
-List payloads must be actual lists or they become `[]`. Each primitive/date
-item uses the same string conversion and fallback rules; local model items use
-their `fromJson`. `toJson` writes dates as ISO-8601 strings and recursively
-writes nested models and local-model lists.
-
-### Safety boundaries and rollback
-
-`--test` refuses a root class, root field, or enum type that is library-private
-because a separate test library cannot safely reference it. Arranging that
-otherwise-supported source without `--test` remains possible. Generated tests
-start with Gold Flutter's ownership marker. An existing test is updated only
-when that marker is its first line; an unowned test is preserved and reported.
-
-Generated tests call the root class's `fromJson` and `toJson` directly. A
-preserved top-level direct-list, `data`, or `data.items` helper is therefore
-compatible with `--test` when the root class itself accepts a direct object. If
-the root class's preserved `fromJson` factory reads an envelope, arrangement is
-still supported without `--test`, but focused test generation is refused in
-this release.
-
-Generated `copyWith` uses `argument ?? this.field`. This keeps ordinary calls
-simple but means it cannot deliberately clear a nullable field to `null` in
-this release. Existing supported `copyWith` implementations are preserved.
-
-Before applying, the transaction rechecks the exact model and owned-test text
-shown in the preview. It snapshots only the planned model and owned test, then
-runs targeted Dart formatting, `flutter analyze`, and the generated focused
-test when requested. A write, formatting, analysis, or focused-test failure
-returns exit code 1 and restores the original bytes, removing a newly created
-owned test. Invalid or unsafe arrangement input returns exit code 64 without a
-transaction. Gold Flutter never uses a broad Git reset and does not restore
-unrelated files or external tool caches.
-
-## Optimize an existing project
-
-```bash
-gold_flutter optimize --dry-run
-gold_flutter optimize --yes
-```
-
-`optimize` is a transparent project-health pipeline, not automatic runtime
-performance tuning. It runs dependency resolution, conditional build runner,
-Dart formatting, analysis, and tests in order, then reports missing assets and
-stale generated files. It stops on the first failed tool and restores its
-snapshotted source roots. Downloaded package-cache entries are not removed.
-
-## Add the amount formatter
-
-Install the Nigerian defaults (`en_NG`, `₦`, two decimal digits, grouping, and
-`₦ •••••` for hidden balances):
-
-```bash
-gold_flutter add amount-formatter --yes
-```
-
-Customize it with `--locale`, `--symbol`, `--decimal-digits`, `--no-grouping`,
-and `--hidden-text`. The command owns
-`lib/core/utils/money_formatter.dart` and its focused test, adds `intl` when
-missing, and refuses unowned conflicts. Use it as
-`Text(MoneyFormatter.format(1200))`.
-
-## Generate project documentation
-
-```bash
-gold_flutter docs --dry-run
-gold_flutter docs --yes
-```
-
-The command writes seven Markdown files under `docs/gold_flutter/`. Its
-SHA-256 manifest updates Gold-owned content while preserving user edits.
-Unknown or dynamic facts are reported rather than invented.
-
-Detailed references are under [`docs/commands`](docs/commands/):
-
-- [Command discovery and locations](docs/commands/help.md)
-- [Arrange model](docs/commands/arrange-model.md)
-- [Optimize](docs/commands/optimize.md)
-- [Amount formatter](docs/commands/amount-formatter.md)
-- [Generate docs](docs/commands/docs.md)
-
-## Update
-
-After improvements are pushed to this repository, install the newest version
-with the same command:
-
-```bash
-dart pub global activate --source git --git-ref main \
-  https://github.com/crisantus/gold-flutter.git
-```
-
-Generator updates affect newly created projects only. Existing Flutter apps
-are changed only when you explicitly run a file-changing assistant command,
-review its plan, and confirm it.
-
-## Uninstall
+To uninstall:
 
 ```bash
 dart pub global deactivate gold_flutter
 ```
 
-## Develop the generator
+## Contribute
+
+To work on the generator locally:
 
 ```bash
 git clone https://github.com/crisantus/gold-flutter.git
 cd gold-flutter
 dart pub get --enforce-lockfile
-dart pub deps
 dart analyze
 dart test
 ```
 
-The package declares Dart 3.5 as its minimum and pins development dependencies
-that would otherwise raise the resolved SDK floor. Keep the lockfile enforced
-when checking compatibility; do not regenerate it with a newer dependency graph
-and assume the Dart 3.5 claim still holds.
+Keep the lockfile enforced when checking Dart 3.5 compatibility. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the development and contribution workflow.
 
-To smoke-test the public `main` build instead of a local checkout, activate the
-branch explicitly and inspect the nested command:
-
-```bash
-dart pub global activate --source git --git-ref main \
-  https://github.com/crisantus/gold-flutter.git
-gold_flutter arrange model --help
-```
-
-During the current `0.2.0-dev` test-and-debug cycle, maintainers may work and
-commit directly on local `main`; a local feature branch is optional, not a
-requirement. Keep tests green and review the complete diff before any public
-push, tag, or release. External contributors may still use a branch and pull
-request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
-
-## Security
-
-Templates contain placeholders and example URLs only. Never commit API keys,
-tokens, signing certificates, service-account files, production `.env` files,
-or real credentials to this public repository or to a generated application.
+Templates use placeholders and example URLs. Keep credentials, tokens, signing
+files, and production configuration out of version control.
 
 ## License
 
-Gold Flutter is available under the [MIT License](LICENSE.md).
+[MIT](LICENSE.md).

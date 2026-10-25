@@ -41,6 +41,13 @@ final class TemplateRenderer implements ProjectTemplateRenderer {
       '{{uses_refresh_tokens}}': answers.usesRefreshTokens ? 'yes' : 'no',
       '{{includes_sample_api}}': answers.includesSampleApi ? 'yes' : 'no',
       '{{api_base_url}}': answers.apiBaseUri?.toString() ?? '',
+      '{{token_storage_notes}}': answers.usesAuthentication
+          ? 'Tokens are stored using `shared_preferences` '
+              '(`SharedPreferencesAsync`) through `tokenStorageProvider` in '
+              '`lib/core/network/token_storage.dart`. '
+              'Preferences are not encrypted. Clearing a session removes only '
+              'the access and refresh tokens.'
+          : '',
       '{{sample_route_import}}': answers.includesSampleApi
           ? "import '../../core/route/app_router.dart';"
           : '',

@@ -1,7 +1,7 @@
 const authTemplates = <String, String>{
   'lib/core/network/token_storage.dart':
       r'''import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 abstract interface class TokenStorage {
   Future<String?> readAccessToken();
@@ -10,37 +10,128 @@ abstract interface class TokenStorage {
   Future<void> clear();
 }
 
-class SecureTokenStorage implements TokenStorage {
-  const SecureTokenStorage(this._storage);
+/// Stores tokens in unencrypted application preferences.
+class SharedPreferencesTokenStorage implements TokenStorage {
+  const SharedPreferencesTokenStorage(this._storage);
 
   static const _accessTokenKey = 'access_token';
   static const _refreshTokenKey = 'refresh_token';
-  final FlutterSecureStorage _storage;
+  final SharedPreferencesAsync _storage;
 
   @override
-  Future<String?> readAccessToken() => _storage.read(key: _accessTokenKey);
+  Future<String?> readAccessToken() => _storage.getString(_accessTokenKey);
 
   @override
-  Future<String?> readRefreshToken() => _storage.read(key: _refreshTokenKey);
+  Future<String?> readRefreshToken() => _storage.getString(_refreshTokenKey);
 
   @override
   Future<void> saveTokens({
     required String accessToken,
     String? refreshToken,
   }) async {
-    await _storage.write(key: _accessTokenKey, value: accessToken);
+    await _storage.setString(_accessTokenKey, accessToken);
     if (refreshToken != null && refreshToken.isNotEmpty) {
-      await _storage.write(key: _refreshTokenKey, value: refreshToken);
+      await _storage.setString(_refreshTokenKey, refreshToken);
     }
   }
 
   @override
-  Future<void> clear() => _storage.deleteAll();
+  Future<void> clear() async {
+    await _storage.remove(_accessTokenKey);
+    await _storage.remove(_refreshTokenKey);
+  }
 }
 
 final tokenStorageProvider = Provider<TokenStorage>((ref) {
-  return const SecureTokenStorage(FlutterSecureStorage());
+  return SharedPreferencesTokenStorage(SharedPreferencesAsync());
 });
+''',
+  'test/core/network/token_storage_test.dart':
+      r'''import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:{{project_name}}/core/network/token_storage.dart';
+
+void main() {
+  late _FakePreferences preferences;
+  late TokenStorage storage;
+
+  setUp(() {
+    preferences = _FakePreferences();
+    storage = SharedPreferencesTokenStorage(preferences);
+  });
+
+  test('missing tokens return null', () async {
+    expect(await storage.readAccessToken(), isNull);
+    expect(await storage.readRefreshToken(), isNull);
+  });
+
+  test('saved tokens can be read by a new storage instance', () async {
+    await storage.saveTokens(accessToken: 'access', refreshToken: 'refresh');
+
+    final restored = SharedPreferencesTokenStorage(preferences);
+    expect(await restored.readAccessToken(), 'access');
+    expect(await restored.readRefreshToken(), 'refresh');
+  });
+
+  test('access-only updates preserve the existing refresh token', () async {
+    await storage.saveTokens(accessToken: 'access', refreshToken: 'refresh');
+    await storage.saveTokens(accessToken: 'next');
+    expect(await storage.readAccessToken(), 'next');
+    expect(await storage.readRefreshToken(), 'refresh');
+
+    await storage.saveTokens(accessToken: 'latest', refreshToken: '');
+    expect(await storage.readAccessToken(), 'latest');
+    expect(await storage.readRefreshToken(), 'refresh');
+  });
+
+  test('token rotation replaces both tokens', () async {
+    await storage.saveTokens(accessToken: 'access', refreshToken: 'refresh');
+    await storage.saveTokens(accessToken: 'next', refreshToken: 'rotated');
+
+    expect(await storage.readAccessToken(), 'next');
+    expect(await storage.readRefreshToken(), 'rotated');
+  });
+
+  test('clearing a session preserves unrelated preferences', () async {
+    await preferences.setString('theme', 'dark');
+    await storage.saveTokens(accessToken: 'access', refreshToken: 'refresh');
+    await storage.clear();
+    await storage.clear();
+
+    expect(await storage.readAccessToken(), isNull);
+    expect(await storage.readRefreshToken(), isNull);
+    expect(await preferences.getString('theme'), 'dark');
+  });
+
+  test('write failures are reported to the caller', () async {
+    preferences.failedWriteKeys.add('access_token');
+
+    await expectLater(
+      storage.saveTokens(accessToken: 'access'),
+      throwsStateError,
+    );
+    expect(await storage.readAccessToken(), isNull);
+  });
+}
+
+class _FakePreferences extends Fake implements SharedPreferencesAsync {
+  final _values = <String, String>{};
+  final failedWriteKeys = <String>{};
+
+  @override
+  Future<String?> getString(String key) async => _values[key];
+
+  @override
+  Future<void> setString(String key, String value) async {
+    if (failedWriteKeys.contains(key)) throw StateError('Write failed');
+    _values[key] = value;
+  }
+
+  @override
+  Future<void> remove(String key) async {
+    _values.remove(key);
+  }
+}
 ''',
   'lib/core/network/session_manager.dart':
       r'''import 'package:flutter_riverpod/flutter_riverpod.dart';

@@ -20,7 +20,7 @@ final class DependencyManifest {
       ]);
     }
     if (answers.usesAuthentication) {
-      dependencies.add('  flutter_secure_storage: ^9.2.4');
+      dependencies.add('  shared_preferences: ^2.3.5');
     }
 
     final description = TextEscaping.yamlDoubleQuoted(answers.displayName);

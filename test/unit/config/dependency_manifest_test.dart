@@ -11,6 +11,7 @@ void main() {
     expect(pubspec, contains('auto_route:'));
     expect(pubspec, isNot(contains('dio:')));
     expect(pubspec, isNot(contains('flutter_secure_storage:')));
+    expect(pubspec, isNot(contains('shared_preferences:')));
   });
 
   test('API dependency set adds transport without token storage', () {
@@ -20,11 +21,17 @@ void main() {
     expect(pubspec, contains('dartz:'));
     expect(pubspec, contains('internet_connection_checker_plus:'));
     expect(pubspec, isNot(contains('flutter_secure_storage:')));
+    expect(pubspec, isNot(contains('shared_preferences:')));
   });
 
-  test('authenticated dependency set adds secure storage', () {
-    final pubspec = const DependencyManifest().render(authenticatedAnswers);
+  for (final answers in [apiAuthAnswers, authenticatedAnswers]) {
+    test(
+        'authenticated dependencies use preferences '
+        '(refresh: ${answers.usesRefreshTokens})', () {
+      final pubspec = const DependencyManifest().render(answers);
 
-    expect(pubspec, contains('flutter_secure_storage:'));
-  });
+      expect(pubspec, contains('shared_preferences: ^2.3.5'));
+      expect(pubspec, isNot(contains('flutter_secure_storage:')));
+    });
+  }
 }

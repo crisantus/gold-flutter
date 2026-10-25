@@ -150,6 +150,8 @@ void main() {
     final readme = File(p.join(root.path, 'README.md')).readAsStringSync();
     expect(readme, contains('My Parking App'));
     expect(readme, contains('com.company.parking'));
+    expect(readme, contains('lib/presentation/'));
+    expect(readme, isNot(contains('shared_preferences')));
     expect(readme, isNot(contains('{{')));
   });
 
@@ -205,35 +207,62 @@ void main() {
     );
   });
 
-  test('authentication and refresh choices render only their infrastructure',
-      () async {
-    final root = await Directory.systemTemp.createTemp('gold_template_test_');
-    addTearDown(() => root.delete(recursive: true));
+  for (final answers in [apiAuthAnswers, authenticatedAnswers]) {
+    test(
+        'authentication uses preferences '
+        '(refresh: ${answers.usesRefreshTokens})', () async {
+      final root = await Directory.systemTemp.createTemp('gold_template_test_');
+      addTearDown(() => root.delete(recursive: true));
 
-    await const TemplateRenderer().render(
-      projectRoot: root,
-      answers: authenticatedAnswers,
-    );
+      await const TemplateRenderer().render(
+        projectRoot: root,
+        answers: answers,
+      );
 
-    expect(
-        File(p.join(root.path, 'lib/core/network/token_storage.dart'))
-            .existsSync(),
-        isTrue);
-    expect(
-      File(p.join(root.path, 'lib/core/network/token_refresh_coordinator.dart'))
-          .existsSync(),
-      isTrue,
-    );
-    expect(
-      File(
-        p.join(
-          root.path,
-          'test/core/network/authorization_interceptor_test.dart',
+      final storage = File(
+        p.join(root.path, 'lib/core/network/token_storage.dart'),
+      ).readAsStringSync();
+      expect(
+        storage,
+        allOf(
+          contains('SharedPreferencesTokenStorage(SharedPreferencesAsync())'),
+          contains(
+              "import 'package:shared_preferences/shared_preferences.dart';"),
+          isNot(contains('flutter_secure_storage')),
         ),
-      ).readAsStringSync(),
-      contains('dio: dio'),
-    );
-  });
+      );
+      final readme = File(p.join(root.path, 'README.md')).readAsStringSync();
+      expect(readme, contains('Preferences are not encrypted'));
+      expect(readme, contains('tokenStorageProvider'));
+      expect(readme, isNot(contains('{{')));
+      expect(
+        File(p.join(root.path, 'test/core/network/token_storage_test.dart'))
+            .readAsStringSync(),
+        allOf(
+          contains('preserves unrelated preferences'),
+          contains('token rotation replaces both tokens'),
+          contains('package:my_parking_app/core/network/token_storage.dart'),
+        ),
+      );
+      expect(
+        File(p.join(
+                root.path, 'lib/core/network/token_refresh_coordinator.dart'))
+            .existsSync(),
+        answers.usesRefreshTokens,
+      );
+      expect(
+        File(
+          p.join(
+            root.path,
+            'test/core/network/authorization_interceptor_test.dart',
+          ),
+        ).readAsStringSync(),
+        answers.usesRefreshTokens
+            ? contains('dio: dio')
+            : isNot(contains('dio: dio')),
+      );
+    });
+  }
 
   test('sample API choice renders every architectural seam and screen',
       () async {
