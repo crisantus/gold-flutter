@@ -41,6 +41,9 @@ void main() {
     expect(files['docs/gold_flutter/models.md'], contains('UserModel'));
     final commands = files['docs/gold_flutter/commands.md']!;
     expect(commands, contains('gold_flutter help'));
+    for (final command in ['check-update', 'update', 'uninstall']) {
+      expect(commands, contains('gold_flutter $command'));
+    }
     expect(commands, contains('Parent folder'));
     expect(commands, contains('Flutter project root'));
   });

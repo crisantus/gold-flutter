@@ -19,6 +19,7 @@ import '../project/project_inspector.dart';
 import '../prompts/answers_collector.dart';
 import '../prompts/prompt_io.dart';
 import '../validation/input_validation.dart';
+import 'cli_lifecycle.dart';
 import 'doctor_command.dart';
 
 final class GoldFlutterCli {
@@ -29,13 +30,15 @@ final class GoldFlutterCli {
     ModelArranger? modelArranger,
     ChangeTransaction? changeTransaction,
     ProjectOptimizer? projectOptimizer,
+    CliLifecycle? lifecycle,
   })  : _io = io,
         _generator = generator ?? DefaultProjectGenerator.standard(),
         _currentDirectory = currentDirectory ?? Directory.current,
         _modelArranger = modelArranger ?? const ModelArranger(),
         _changeTransaction = changeTransaction ??
             ChangeTransaction(executor: const LocalProcessExecutor()),
-        _projectOptimizer = projectOptimizer ?? const ProjectOptimizer();
+        _projectOptimizer = projectOptimizer ?? const ProjectOptimizer(),
+        _lifecycle = lifecycle ?? CliLifecycle(io: io);
 
   static const version = '0.2.0-dev';
 
@@ -45,6 +48,7 @@ final class GoldFlutterCli {
   final ModelArranger _modelArranger;
   final ChangeTransaction _changeTransaction;
   final ProjectOptimizer _projectOptimizer;
+  final CliLifecycle _lifecycle;
 
   Future<int> run(List<String> arguments) async {
     final parser = _buildParser();
@@ -88,7 +92,14 @@ final class GoldFlutterCli {
 
     switch (command.name) {
       case 'create':
+        await _lifecycle.beforeCreate(enabled: command['update-check'] as bool);
         return _runCreate(command);
+      case 'check-update':
+        return _lifecycle.checkUpdate();
+      case 'update':
+        return _lifecycle.update();
+      case 'uninstall':
+        return _lifecycle.uninstall();
       case 'doctor':
         return _runDoctor();
       case 'arrange':
@@ -513,7 +524,15 @@ final class GoldFlutterCli {
     final parser = ArgParser()
       ..addFlag('help', abbr: 'h', negatable: false)
       ..addFlag('version', negatable: false);
+    parser.addCommand('check-update');
+    parser.addCommand('update');
+    parser.addCommand('uninstall');
     parser.addCommand('create')
+      ..addFlag(
+        'update-check',
+        defaultsTo: true,
+        help: 'Check GitHub for an optional CLI update before creating.',
+      )
       ..addOption('display-name')
       ..addOption('project-name')
       ..addOption('application-id')
@@ -610,6 +629,18 @@ final class GoldFlutterCli {
     _io.writeLine('Create and maintain Riverpod + AutoRoute Flutter projects.');
     _io.writeLine('');
     _io.writeLine('Commands');
+    for (final entry in {
+      'check-update': 'Check GitHub main for a newer CLI commit.',
+      'update': 'Update the CLI through Dart Pub; preserve Flutter projects.',
+      'uninstall':
+          'Remove the CLI through Dart Pub; preserve Flutter projects.',
+    }.entries) {
+      _writeCatalogEntry(
+        command: 'gold_flutter ${entry.key}',
+        description: entry.value,
+        location: 'Anywhere.',
+      );
+    }
     _writeCatalogEntry(
       command: 'gold_flutter create',
       description: 'Create a complete new Flutter application.',
@@ -668,6 +699,20 @@ final class GoldFlutterCli {
     late final String example;
     late final ArgParser commandParser;
     switch (topic) {
+      case 'check-update':
+      case 'update':
+      case 'uninstall':
+        usage = 'gold_flutter $topic';
+        description = switch (topic) {
+          'check-update' => 'Check GitHub main for a newer CLI commit.',
+          'update' =>
+            'Update the CLI through Dart Pub. Flutter projects are unchanged.',
+          _ =>
+            'Remove the CLI through Dart Pub. Flutter projects are unchanged.',
+        };
+        location = 'Anywhere.';
+        example = 'gold_flutter $topic';
+        commandParser = parser.commands[topic]!;
       case 'create':
         usage = 'gold_flutter create [options]';
         description = 'Create a complete Riverpod + AutoRoute Flutter app.';

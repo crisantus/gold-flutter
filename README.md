@@ -177,11 +177,47 @@ Review a downloaded script before running it.
 
 ## Update or uninstall
 
-To update, run the installation command again. Updates apply to newly generated
-apps. To change an existing app, run the relevant project command and review
-its plan.
+Run these commands from any folder:
 
-To uninstall:
+```bash
+gold_flutter check-update
+gold_flutter update
+gold_flutter uninstall
+```
+
+Before `gold_flutter create` starts, the CLI checks GitHub's `main` branch
+for a newer commit and shows `gold_flutter update` when an update is available.
+This detects changes even when the package version stays the same. Updates are
+optional: ignore the notice and continue creating with your installed version.
+An unavailable check (offline, timeout, or rate limit) also allows creation to
+continue. The entire check has a 1.8-second deadline.
+
+Skip the automatic check for one creation:
+
+```bash
+gold_flutter create --no-update-check
+```
+
+Or set `GOLD_FLUTTER_NO_UPDATE_CHECK=1` in your environment. Automatic checks
+are skipped in CI. An explicit `gold_flutter check-update` still checks and
+returns a nonzero exit code if the installation cannot be identified or GitHub
+is unavailable. Local builds ahead of GitHub are identified without prompting
+for a downgrade; diverged histories are reported separately.
+
+`gold_flutter update` runs the installation command again using the current
+Dart executable and your existing Pub cache (`PUB_CACHE`, when set):
+
+```bash
+dart pub global activate --source git --git-ref main \
+  https://github.com/crisantus/gold-flutter.git
+```
+
+Existing apps keep their generated code. To change an existing app, run the
+relevant project command and review its plan.
+
+`gold_flutter uninstall` removes only the globally activated CLI. It keeps
+your Flutter projects, app dependencies, and generated project guides. The
+manual fallback also works with older CLI versions:
 
 ```bash
 dart pub global deactivate gold_flutter

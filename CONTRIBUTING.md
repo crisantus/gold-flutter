@@ -23,12 +23,25 @@ local work and remains useful for external pull requests.
 Run these checks before proposing a change:
 
 ```bash
-dart format --output=none --set-exit-if-changed bin lib test
+dart format --output=none --set-exit-if-changed bin lib test tool
 dart analyze
 dart test
 bash -n scripts/install.sh
 ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml')"
 ```
+
+For CLI installation changes, run the isolated Dart Pub smoke test:
+
+```bash
+dart run tool/verify_cli_lifecycle.dart
+# Also exercise the real update command against GitHub:
+dart run tool/verify_cli_lifecycle.dart --live-update
+```
+
+It downloads dependencies into a temporary `PUB_CACHE`, verifies installed
+Git revision metadata and same-version commit reactivation, then uninstalls
+while comparing every existing fixture application file. Your normal global
+installation is unchanged. The live option also activates GitHub `main`.
 
 Changes to generated Flutter code must also generate and verify the supported
 project variants with `flutter analyze` and `flutter test`.
@@ -46,5 +59,6 @@ Linux CI runs the full suite and exercises every assistant command in a
 disposable Flutter application. Windows parses the installer and runs
 platform-neutral safety tests.
 
-Users receive the latest version by running the activation command from the
-README again.
+Users receive optional notices before `create` and can run `gold_flutter update`
+to activate the latest GitHub `main`. The manual activation command in the
+README remains available for older installations.

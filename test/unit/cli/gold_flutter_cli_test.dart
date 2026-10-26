@@ -72,6 +72,7 @@ void main() {
       currentDirectory: Directory('/work'),
     ).run([
       'create',
+      '--no-update-check',
       '--display-name',
       'My App',
       '--project-name',

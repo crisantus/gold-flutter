@@ -2,6 +2,10 @@
 
 ## 0.2.0 - Unreleased
 
+- Add Dart Pub CLI update and uninstall commands that preserve existing apps.
+- Show optional GitHub commit update notices before creation, with offline,
+  CI, environment, and per-command opt-outs.
+
 - Add transactional previews, confirmation, scoped snapshots, and rollback.
 - Add `gold_flutter arrange model` with defensive EyeAsk conventions.
 - Add `gold_flutter optimize` for ordered project-health checks.
